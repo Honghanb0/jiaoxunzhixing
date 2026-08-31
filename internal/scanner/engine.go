@@ -1,0 +1,600 @@
+package scanner
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"strings"
+	"sync"
+	"time"
+
+	"security-agent/internal/ai"
+	"security-agent/internal/config"
+	"security-agent/internal/models"
+	"security-agent/internal/storage"
+)
+
+// 扫描终态之外的运行态
+const (
+	StatusRunning = "running"
+	StatusFailed  = "failed"
+	StatusTimeout = "timeout"
+	StatusDone    = "completed"
+)
+
+// ScanProgress 扫描进度信息
+type ScanProgress struct {
+	mu             sync.Mutex
+	ScanJobID      string    `json:"scan_job_id"`
+	Status         string    `json:"status"`
+	Phase          string    `json:"phase"` // crawling / detecting / done
+	CurrentPage    int       `json:"current_page"`
+	TotalPages     int       `json:"total_pages"`
+	VulnFound      int       `json:"vuln_found"`
+	SensitiveFound int       `json:"sensitive_found"`
+	CurrentURL     string    `json:"current_url,omitempty"`
+	StartedAt      time.Time `json:"started_at"`
+	LastUpdatedAt  time.Time `json:"last_updated_at"`
+	Logs           []string  `json:"logs,omitempty"`
+
+	lastPersistAt time.Time // 落库节流（不参与序列化）
+}
+
+// snapshot 返回进度快照。
+// 注意不能直接 `cp := *p` —— ScanProgress 含 sync.Mutex，拷贝锁值会被 vet 报错，
+// 且这样返回的是脱离锁保护的对象，可安全交给 HTTP 层序列化。
+func (p *ScanProgress) snapshot() *ScanProgress {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return &ScanProgress{
+		ScanJobID:      p.ScanJobID,
+		Status:         p.Status,
+		Phase:          p.Phase,
+		CurrentPage:    p.CurrentPage,
+		TotalPages:     p.TotalPages,
+		VulnFound:      p.VulnFound,
+		SensitiveFound: p.SensitiveFound,
+		CurrentURL:     p.CurrentURL,
+		StartedAt:      p.StartedAt,
+		LastUpdatedAt:  p.LastUpdatedAt,
+		Logs:           append([]string(nil), p.Logs...),
+		lastPersistAt:  p.lastPersistAt,
+	}
+}
+
+// ScanProgressStore 全局扫描进度存储
+var ScanProgressStore = sync.Map{}
+
+type Engine struct {
+	cfg           *config.Config
+	crawler       *Crawler
+	detector      *Detector
+	domainRepo    *storage.DomainRepository
+	scanJobRepo   *storage.ScanJobRepository
+	vulnRepo      *storage.VulnerabilityRepository
+	sensitiveRepo *storage.SensitiveInfoRepository
+	pageRepo      *storage.PageRepository
+	aiModule      *ai.AIModule
+
+	// 运行中任务的取消函数：scanJobID -> context.CancelFunc
+	cancels  sync.Map
+	stopCh   chan struct{}
+	stopOnce sync.Once
+}
+
+// NewEngine 构建扫描引擎。
+// aiMgr 为多模型路由中心；传 nil 时按配置自行构建，
+// 但推荐由上层（api.NewServer）传入，与 HTTP 层共享同一份连接池与运行时状态。
+func NewEngine(cfg *config.Config, store *storage.Neo4jStore, aiMgr *ai.Manager) *Engine {
+	domainRepo := storage.NewDomainRepository(store)
+	scanJobRepo := storage.NewScanJobRepository(store)
+	vulnRepo := storage.NewVulnerabilityRepository(store)
+	sensitiveRepo := storage.NewSensitiveInfoRepository(store)
+	pageRepo := storage.NewPageRepository(store)
+
+	crawler := NewCrawler(&cfg.Scanner, domainRepo, pageRepo)
+	detector := NewDetector(&cfg.Scanner, &cfg.Sensitive, vulnRepo, sensitiveRepo)
+
+	if aiMgr == nil {
+		aiMgr = ai.NewManager(&cfg.AI)
+	}
+	aiModule := ai.NewAIModuleWithManager(aiMgr)
+
+	return &Engine{
+		cfg:           cfg,
+		crawler:       crawler,
+		detector:      detector,
+		domainRepo:    domainRepo,
+		scanJobRepo:   scanJobRepo,
+		vulnRepo:      vulnRepo,
+		sensitiveRepo: sensitiveRepo,
+		pageRepo:      pageRepo,
+		aiModule:      aiModule,
+		stopCh:        make(chan struct{}),
+	}
+}
+
+// maxScanDuration 单次扫描的最长允许时长
+func (e *Engine) maxScanDuration() time.Duration {
+	if e.cfg != nil && e.cfg.Scanner.MaxScanMinutes > 0 {
+		return time.Duration(e.cfg.Scanner.MaxScanMinutes) * time.Minute
+	}
+	return 2 * time.Hour
+}
+
+// staleJobAge 运行多久以上的任务被视为僵死
+func (e *Engine) staleJobAge() time.Duration {
+	if e.cfg != nil && e.cfg.Scanner.StaleJobMinutes > 0 {
+		return time.Duration(e.cfg.Scanner.StaleJobMinutes) * time.Minute
+	}
+	return 3 * time.Hour
+}
+
+// RecoverStaleJobs 回收僵死任务。
+// 进程重启后，原先 running 的 goroutine 已不存在，若不处理这些任务会永远停在
+// running 状态（前端就会显示"跑了 271 小时还是 0 页"）。
+func (e *Engine) RecoverStaleJobs() {
+	n, err := e.scanJobRepo.MarkStaleRunning(e.staleJobAge(), StatusTimeout)
+	if err != nil {
+		log.Printf("[Scan] 回收僵死任务失败: %v", err)
+		return
+	}
+	if n > 0 {
+		log.Printf("[Scan] 已回收 %d 个僵死的运行任务（超过 %v 未完成）", n, e.staleJobAge())
+	}
+}
+
+// StartWatchdog 启动看门狗：定期检查是否有任务超时未结束并强制中止。
+func (e *Engine) StartWatchdog() {
+	go func() {
+		ticker := time.NewTicker(1 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-e.stopCh:
+				return
+			case <-ticker.C:
+				e.checkTimeouts()
+			}
+		}
+	}()
+	log.Printf("[Scan] 看门狗已启动（单次扫描上限 %v）", e.maxScanDuration())
+}
+
+// Stop 停止后台协程
+func (e *Engine) Stop() {
+	e.stopOnce.Do(func() { close(e.stopCh) })
+}
+
+// checkTimeouts 中止超过最大时长的任务
+func (e *Engine) checkTimeouts() {
+	limit := e.maxScanDuration()
+	e.cancels.Range(func(key, value any) bool {
+		jobID, _ := key.(string)
+		cancel, ok := value.(context.CancelFunc)
+		if !ok {
+			return true
+		}
+		if v, ok := ScanProgressStore.Load(jobID); ok {
+			p, ok := v.(*ScanProgress)
+			if !ok {
+				return true
+			}
+			p.mu.Lock()
+			started := p.StartedAt
+			status := p.Status
+			p.mu.Unlock()
+
+			if status == StatusRunning && time.Since(started) > limit {
+				log.Printf("[Scan] 任务 %s 运行超过 %v，强制中止", jobID, limit)
+				cancel()
+			}
+		}
+		return true
+	})
+}
+
+// CancelScan 中止指定扫描任务
+func (e *Engine) CancelScan(scanJobID string) bool {
+	if v, ok := e.cancels.Load(scanJobID); ok {
+		if cancel, ok := v.(context.CancelFunc); ok {
+			log.Printf("[Scan] 收到中止请求: %s", scanJobID)
+			cancel()
+			return true
+		}
+	}
+	return false
+}
+
+func (e *Engine) Scan(domainID string) (*models.ScanJob, error) {
+	domain, err := e.domainRepo.GetByID(domainID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get domain: %w", err)
+	}
+
+	scanJob := &models.ScanJob{
+		DomainID:  domainID,
+		Status:    "pending",
+		StartedAt: time.Now(),
+	}
+
+	if err := e.scanJobRepo.Create(scanJob); err != nil {
+		return nil, fmt.Errorf("failed to create scan job: %w", err)
+	}
+
+	e.scanJobRepo.UpdateStatus(scanJob.ID, StatusRunning)
+	scanJob.Status = StatusRunning
+
+	// 初始化扫描进度
+	ScanProgressStore.Store(scanJob.ID, &ScanProgress{
+		ScanJobID:      scanJob.ID,
+		Status:         StatusRunning,
+		Phase:          "crawling",
+		CurrentPage:    0,
+		TotalPages:     domain.MaxPages,
+		VulnFound:      0,
+		SensitiveFound: 0,
+		StartedAt:      time.Now(),
+		LastUpdatedAt:  time.Now(),
+		Logs:           []string{},
+	})
+
+	// 扫描级超时：保证任何情况下任务都会结束，不会无限挂起
+	scanCtx, cancel := context.WithTimeout(context.Background(), e.maxScanDuration())
+	e.cancels.Store(scanJob.ID, cancel)
+
+	// 绑定爬取进度回调：实时同步爬取阶段的进度
+	e.crawler.SetProgressCallback(func(crawled, total int, currentURL string) {
+		e.updateProgress(scanJob.ID, StatusRunning, "crawling", crawled, total, 0, currentURL)
+	})
+
+	go e.runScan(scanCtx, scanJob, domain)
+
+	return scanJob, nil
+}
+
+// runScan 执行扫描主体。
+// 任何路径退出时都会清理取消函数；发生 panic 时也会把任务标记为失败，
+// 避免任务停留在 running 成为僵尸。
+func (e *Engine) runScan(scanCtx context.Context, scanJob *models.ScanJob, domain *models.Domain) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			log.Printf("[Scan] %s 内部异常: %v", scanJob.ID, rec)
+			e.scanJobRepo.Fail(scanJob.ID, StatusFailed, fmt.Sprintf("内部错误: %v", rec))
+			e.updateProgress(scanJob.ID, StatusFailed, "failed", 0, 0, 0, "")
+		}
+		// 释放取消函数，防止 cancel 泄漏
+		if v, ok := e.cancels.Load(scanJob.ID); ok {
+			if fn, ok := v.(context.CancelFunc); ok {
+				fn()
+			}
+			e.cancels.Delete(scanJob.ID)
+		}
+	}()
+
+	e.addLog(scanJob.ID, fmt.Sprintf("Starting scan job %s for domain %s", scanJob.ID, domain.Name))
+
+	startURL := domain.Name
+	// CIDR 段或单 IP 不补 scheme；只有主机名/域名形式才补 https://
+	if !hasScheme(startURL) && !strings.Contains(startURL, "/") && !isBareIP(startURL) {
+		startURL = "https://" + startURL
+	}
+
+	crawlCtx := &CrawlContext{
+		Ctx:       scanCtx, // 外部可取消（超时 / 用户中止）
+		Domain:    &Domain{ID: domain.ID, Name: domain.Name, MaxDepth: domain.MaxDepth, MaxPages: domain.MaxPages, Concurrency: e.cfg.Scanner.Concurrency},
+		StartURL:  startURL,
+		Pages:     make([]*PageInfo, 0),
+		PageCount: 0,
+	}
+
+	if err := e.crawler.Start(crawlCtx); err != nil {
+		log.Printf("Crawl error: %v", err)
+		e.addLog(scanJob.ID, fmt.Sprintf("Crawl error: %v", err))
+		e.scanJobRepo.UpdateStatus(scanJob.ID, StatusFailed)
+		e.updateProgress(scanJob.ID, StatusFailed, "failed", 0, 0, 0, "")
+		return
+	}
+
+	// 爬取结束后若已被取消（超时/中止），不应继续走检测与报告
+	if scanCtx.Err() != nil {
+		e.abort(scanJob, crawlCtx, scanCtx.Err())
+		return
+	}
+
+	e.addLog(scanJob.ID, fmt.Sprintf("Crawled %d pages", len(crawlCtx.Pages)))
+	e.updateProgress(scanJob.ID, StatusRunning, "detecting", 0, domain.MaxPages, 0, "Processing crawled pages...")
+
+	vulns := make([]*models.Vulnerability, 0)
+	sensitiveInfos := make([]*models.SensitiveInfo, 0)
+
+	for i, page := range crawlCtx.Pages {
+		// 每页都检查取消信号，保证中止能及时生效
+		if scanCtx.Err() != nil {
+			e.abort(scanJob, crawlCtx, scanCtx.Err())
+			return
+		}
+
+		page.DomainID = domain.ID
+
+		pageModel := &models.Page{
+			ID:          page.ID,
+			DomainID:    page.DomainID,
+			URL:         page.URL,
+			Title:       page.Title,
+			StatusCode:  page.StatusCode,
+			ContentHash: page.ContentHash,
+			Depth:       page.Depth,
+		}
+		e.pageRepo.Create(pageModel)
+
+		pageVulns, _ := e.detector.DetectVulnerabilities(page, scanJob.ID)
+		for _, v := range pageVulns {
+			v.ScanJobID = scanJob.ID
+			v.PageID = page.ID
+			v.DomainID = domain.ID
+			v.Fingerprint = models.VulnFingerprint(domain.ID, v.Type, v.URL, v.Parameter)
+			e.vulnRepo.Create(v)
+			vulns = append(vulns, v)
+		}
+
+		pageSensitive, _ := e.detector.DetectSensitiveInfo(page, scanJob.ID)
+		for _, s := range pageSensitive {
+			s.ScanJobID = scanJob.ID
+			s.PageID = page.ID
+			e.sensitiveRepo.Create(s)
+			sensitiveInfos = append(sensitiveInfos, s)
+		}
+
+		e.updateProgress(scanJob.ID, StatusRunning, "detecting", i+1, len(crawlCtx.Pages), len(vulns), page.URL)
+	}
+
+	if len(vulns) > 0 || len(sensitiveInfos) > 0 {
+		e.aiModule.AnalyzeResults(vulns, sensitiveInfos)
+	}
+
+	e.aiModule.GenerateReport(scanJob, domain, vulns, sensitiveInfos)
+
+	// 聚合统计并落库，便于列表/仪表盘快速展示，无需逐条回表。
+	summary := &models.ScanSummary{
+		TotalPages:     len(crawlCtx.Pages),
+		TotalVulns:     len(vulns),
+		SensitiveFound: len(sensitiveInfos),
+	}
+	for _, v := range vulns {
+		switch strings.ToLower(v.Severity) {
+		case "high":
+			summary.HighSeverity++
+		case "medium":
+			summary.MediumSeverity++
+		case "low":
+			summary.LowSeverity++
+		}
+	}
+	if err := e.scanJobRepo.Complete(scanJob.ID, summary); err != nil {
+		log.Printf("[Scan] %s 写入完成状态失败: %v", scanJob.ID, err)
+	}
+	e.updateProgress(scanJob.ID, StatusDone, "done", len(crawlCtx.Pages), len(crawlCtx.Pages), len(vulns), "")
+	e.addLog(scanJob.ID, fmt.Sprintf("Scan job %s completed: %d pages, %d vulns (H:%d M:%d L:%d), %d sensitive infos",
+		scanJob.ID, summary.TotalPages, summary.TotalVulns,
+		summary.HighSeverity, summary.MediumSeverity, summary.LowSeverity, summary.SensitiveFound))
+}
+
+// abort 被取消/超时时的统一收尾
+func (e *Engine) abort(scanJob *models.ScanJob, crawlCtx *CrawlContext, cause error) {
+	reason := fmt.Sprintf("扫描已中止: %v", cause)
+	log.Printf("[Scan] %s %s", scanJob.ID, reason)
+	e.addLog(scanJob.ID, reason)
+
+	status := StatusFailed
+	if cause == context.DeadlineExceeded {
+		status = StatusTimeout
+	}
+	e.scanJobRepo.Fail(scanJob.ID, status, reason)
+
+	pages := 0
+	if crawlCtx != nil {
+		pages = len(crawlCtx.Pages)
+	}
+	e.updateProgress(scanJob.ID, status, "aborted", pages, pages, 0, "")
+}
+
+func (e *Engine) updateProgress(scanJobID, status, phase string, currentPage, totalPages, vulnFound int, currentURL string) {
+	v, ok := ScanProgressStore.Load(scanJobID)
+	if !ok {
+		return
+	}
+	p := v.(*ScanProgress)
+
+	p.mu.Lock()
+	p.Status = status
+	p.Phase = phase
+	p.CurrentPage = currentPage
+	p.TotalPages = totalPages
+	p.VulnFound = vulnFound
+	p.CurrentURL = currentURL
+	p.LastUpdatedAt = time.Now()
+	// 落库节流：至少间隔 3 秒，或进入终态时立即写入
+	needPersist := time.Since(p.lastPersistAt) >= 3*time.Second ||
+		status == StatusDone || status == StatusFailed || status == StatusTimeout
+	if needPersist {
+		p.lastPersistAt = time.Now()
+	}
+	p.mu.Unlock()
+
+	if needPersist {
+		// 进度写入数据库，进程重启后仍可读到，而不是一律显示 0
+		if err := e.scanJobRepo.UpdateProgress(scanJobID, currentPage, totalPages); err != nil {
+			log.Printf("[Scan] %s 写入进度失败: %v", scanJobID, err)
+		}
+	}
+}
+
+func (e *Engine) addLog(scanJobID, message string) {
+	v, ok := ScanProgressStore.Load(scanJobID)
+	if !ok {
+		return
+	}
+	p := v.(*ScanProgress)
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.Logs = append(p.Logs, fmt.Sprintf("[%s] %s", time.Now().Format("15:04:05"), message))
+	if len(p.Logs) > 100 {
+		p.Logs = p.Logs[len(p.Logs)-100:]
+	}
+}
+
+// GetScanProgress 获取扫描进度
+func (e *Engine) GetScanProgress(scanJobID string) (*ScanProgress, error) {
+	if v, ok := ScanProgressStore.Load(scanJobID); ok {
+		// 返回快照，避免调用方与扫描协程并发读写同一对象
+		return v.(*ScanProgress).snapshot(), nil
+	}
+
+	// 无内存进度（如进程已重启）：从数据库读取，尽量还原真实状态，
+	// 而不是一律返回 0——否则前端会显示"跑了很久仍是 0 页"。
+	job, err := e.scanJobRepo.GetByID(scanJobID)
+	if err != nil {
+		return nil, err
+	}
+
+	status := job.Status
+	// 数据库里仍是 running，但本机并没有对应协程 → 判定为中断
+	if status == StatusRunning {
+		status = StatusFailed
+	}
+
+	return &ScanProgress{
+		ScanJobID:      scanJobID,
+		Status:         status,
+		Phase:          "done",
+		CurrentPage:    job.CurrentPage,
+		TotalPages:     job.TotalPages,
+		VulnFound:      job.TotalVulns,
+		SensitiveFound: job.SensitiveFound,
+		StartedAt:      job.StartedAt,
+		LastUpdatedAt:  time.Now(),
+	}, nil
+}
+
+// GetScanLogs 获取扫描日志
+func (e *Engine) GetScanLogs(scanJobID string) ([]string, error) {
+	if v, ok := ScanProgressStore.Load(scanJobID); ok {
+		p := v.(*ScanProgress)
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		return append([]string(nil), p.Logs...), nil
+	}
+	return []string{}, nil
+}
+
+func (e *Engine) GetScanResults(scanJobID string) (*ScanResults, error) {
+	vulns, err := e.vulnRepo.ListByScanJob(scanJobID)
+	if err != nil {
+		return nil, err
+	}
+
+	sensitiveInfos, err := e.sensitiveRepo.ListByScanJob(scanJobID)
+	if err != nil {
+		return nil, err
+	}
+
+	stats, _ := e.vulnRepo.GetStatsByScanJob(scanJobID)
+	if stats == nil {
+		stats = &models.ScanSummary{}
+	}
+
+	// 补充页面数：漏洞统计里不含 total_pages，
+	// 而"扫描了多少页"正是用户最关心的指标，从任务记录里取。
+	if stats.TotalPages == 0 {
+		if job, err := e.scanJobRepo.GetByID(scanJobID); err == nil && job != nil {
+			stats.TotalPages = job.TotalPages
+		}
+	}
+
+	return &ScanResults{
+		Vulnerabilities: vulns,
+		SensitiveInfos:  sensitiveInfos,
+		Summary:         stats,
+	}, nil
+}
+
+type ScanResults struct {
+	Vulnerabilities []*models.Vulnerability `json:"vulnerabilities"`
+	SensitiveInfos  []*models.SensitiveInfo `json:"sensitive_infos"`
+	Summary         *models.ScanSummary      `json:"summary"`
+}
+
+// ScanTimeout 单次扫描允许的最长时长（含看门狗上限），供巡检编排等待扫描结束时设超时。
+func (e *Engine) ScanTimeout() time.Duration {
+	return e.maxScanDuration()
+}
+
+// WaitForScanCompletion 阻塞等待指定扫描任务进入终态（completed/failed/timeout），
+// 或直到 timeout 到期。返回扫描结果（即使失败也尽量返回已采集的部分），以及错误。
+// 供 AI 巡检在“先扫描后分析”流程中同步等待扫描结束使用。
+func (e *Engine) WaitForScanCompletion(jobID string, timeout time.Duration) (*ScanResults, error) {
+	deadline := time.Now().Add(timeout)
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		p, err := e.GetScanProgress(jobID)
+		if err == nil {
+			switch p.Status {
+			case StatusDone:
+				res, rerr := e.GetScanResults(jobID)
+				if rerr != nil {
+					return nil, fmt.Errorf("扫描 %s 已完成但读取结果失败: %w", jobID, rerr)
+				}
+				return res, nil
+			case StatusFailed, StatusTimeout:
+				// 扫描已失败：仍尝试返回已采集的部分结果
+				res, _ := e.GetScanResults(jobID)
+				return res, fmt.Errorf("扫描 %s 以 %s 结束", jobID, p.Status)
+			}
+		}
+
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("等待扫描 %s 完成超时（%v）", jobID, timeout)
+		}
+
+		select {
+		case <-ticker.C:
+		}
+	}
+}
+
+func hasScheme(url string) bool {
+	return len(url) > 8 && (url[:7] == "http://" || url[:8] == "https://")
+}
+
+// isBareIP 判断是否为纯 IPv4（不做 CIDR，所以不含 '/'）
+func isBareIP(s string) bool {
+	if strings.Contains(s, "/") {
+		return false
+	}
+	parts := strings.Split(s, ".")
+	if len(parts) != 4 {
+		return false
+	}
+	for _, p := range parts {
+		if p == "" {
+			return false
+		}
+		for _, ch := range p {
+			if ch < '0' || ch > '9' {
+				return false
+			}
+		}
+		n := 0
+		for _, ch := range p {
+			n = n*10 + int(ch-'0')
+		}
+		if n > 255 {
+			return false
+		}
+	}
+	return true
+}

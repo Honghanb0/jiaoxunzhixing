@@ -1,0 +1,78 @@
+# Server Configuration
+server:
+  host: "0.0.0.0"
+  port: 8080
+  mode: "debug"
+  web_root: "./web"  # 前端静态资源根目录（SPA 首页 index.html 所在目录）
+
+# Neo4j Database
+database:
+  neo4j:
+    uri: "neo4j://127.0.0.1:7687"
+    username: "neo4j"
+    password: "${NEO4J_PASSWORD}"
+    database: "neo4j"
+    max_connection_pool_size: 50
+    connection_acquisition_timeout: 30s
+    max_transaction_retry_time: 5s
+    max_retry_attempts: 5
+    retry_backoff: 2s
+
+# AI Configuration (DeepSeek)
+ai:
+  provider: "deepseek"
+  api_key: "${DEEPSEEK_API_KEY}"
+  model: "deepseek-chat"
+  base_url: "https://api.deepseek.com"
+  timeout: 30
+
+# Scanner Configuration
+scanner:
+  concurrency: 5
+  timeout: 300
+  user_agent: "SecurityScanner/1.0 (+http://security-agent.local)"
+  max_depth: 3
+  max_pages: 100
+  respect_robots: true
+
+# Scheduler
+scheduler:
+  enabled: true
+  max_concurrent_scans: 3
+
+# Sensitive Info Detection
+sensitive:
+  keywords:
+    - "password"
+    - "secret"
+    - "api_key"
+    - "token"
+    - "credential"
+    - "private_key"
+  regex_patterns:
+    - "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b"
+    - "\\b\\d{3}-\\d{2}-\\d{4}\\b"
+    - "-----BEGIN (RSA |EC )?PRIVATE KEY-----"
+  file_extensions:
+    - ".sql"
+    - ".bak"
+    - ".config"
+    - ".conf"
+    - ".env"
+    - ".git"
+    - ".svn"
+    - ".htaccess"
+    - ".htpasswd"
+
+# Alert Channels
+alerts:
+  enabled: true
+  channels:
+    - type: "webhook"
+      url: "${WEBHOOK_URL}"
+
+# Logging
+logging:
+  level: "debug"
+  format: "text"
+  output: "stdout"

@@ -1,0 +1,9 @@
+2026/08/30 16:38:24 [Neo4j] 连接成功: neo4j://127.0.0.1:7687 | 数据库: neo4j | 用户: n****
+2026/08/30 16:38:25 [Scan] 看门狗已启动（单次扫描上限 2h0m0s）
+2026/08/30 16:38:25 [Auth] 已存在 1 个用户，跳过默认管理员创建
+2026/08/30 16:38:25 Added scheduled task for domain oa.cuz.edu.cn (ID: 4d2cd12e-efd0-489e-a107-316364ae3b02), cron: 0 16 * * *
+2026/08/30 16:38:25 Scheduler started
+2026/08/30 16:38:25 Server starting on 0.0.0.0:8080
+2026/08/30 16:43:20 Added scheduled task for domain http://127.0.0.1:8099 (ID: f0695872-a85d-4309-8794-2bed13b51469), cron: 0 5 * * * *
+2026/08/30 16:43:34 Removed scheduled task for domain f0695872-a85d-4309-8794-2bed13b51469
+2026/08/30 16:43:34 Added scheduled task for domain http://127.0.0.1:8099 (ID: f0695872-a85d-4309-8794-2bed13b51469), cron: 0 45 * * * *

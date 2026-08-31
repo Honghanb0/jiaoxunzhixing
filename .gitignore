@@ -1,0 +1,54 @@
+# ========== 构建产物 ==========
+bin/
+*.exe
+*.exe~
+security-agent
+*.test
+*.out
+
+# ========== 运行时日志 ==========
+logs/
+*.log
+
+# ========== Python ==========
+__pycache__/
+*.pyc
+
+# ========== 配置与密钥（含真实凭据，勿入库）==========
+config.yaml
+config.test.yaml
+.env
+
+# ========== 数据库数据 ==========
+data/
+
+# ========== IDE / OS ==========
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ========== 临时 / 一次性验证脚本（不入库）==========
+# 说明：下列脚本均为本地调试、验证、基准测试用的独立脚本，
+# 不属于平台源码，无需推送至 GitHub。
+_t_*
+check_*.js
+check_*.py
+insp_*.js
+insp_*.py
+verify_*.js
+verify_*.py
+verify_inspection.py
+verify_total_pages.py
+verify_vuln_detection.py
+gen_fingerprints.py
+replay.js
+_inject_logo.py
+request.txt
+verify_site/
+sa_*.exe
+sa_v*.exe
+sa_ai.exe~
