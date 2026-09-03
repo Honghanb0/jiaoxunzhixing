@@ -1,0 +1,65 @@
+# =============================================================================
+# Nuclei 模板集成配置
+# =============================================================================
+# 将 vuln-engine 的规则与 Nuclei 模板映射，实现自动化 CVE 检测
+# =============================================================================
+
+version: "1.0"
+description: "Nuclei 模板与 vuln-engine 规则映射"
+
+# Nuclei 执行配置
+execution:
+  binary: "nuclei"
+  template_directory: "~/.nuclei-templates"
+  rate_limit: 50
+  timeout: 10
+  retries: 1
+  concurrency: 25
+  # 严重等级过滤
+  severity:
+    - critical
+    - high
+    - medium
+  # 标签过滤
+  tags:
+    - cve
+    - exposure
+    - misconfig
+    - default-login
+    - tech
+  # 排除的模板
+  exclude_tags:
+    - dos
+    - intrusive
+    - fuzz
+
+# 规则映射：vuln-engine 规则 -> Nuclei 模板标签
+rule_mappings:
+  - rule_id: "rule-known-vulnerable-components"
+    nuclei_tags: ["cve", "exposure", "tech"]
+    description: "已知漏洞组件检测，匹配 CVE 模板"
+  - rule_id: "rule-security-misconfiguration"
+    nuclei_tags: ["misconfig", "exposure", "default-login"]
+    description: "安全配置错误检测"
+  - rule_id: "rule-sensitive-file-exposure"
+    nuclei_tags: ["exposure", "misconfig"]
+    description: "敏感文件暴露检测"
+  - rule_id: "rule-broken-authentication"
+    nuclei_tags: ["default-login", "auth"]
+    description: "认证失败检测"
+  - rule_id: "rule-broken-access-control-idor"
+    nuclei_tags: ["exposure"]
+    description: "越权访问检测"
+
+# 输出格式
+output:
+  format: "json"
+  fields:
+    - template-id
+    - info.severity
+    - info.name
+    - matched-at
+    - extracted-results
+  # 自动导入到 vuln-engine
+  auto_import: true
+  import_confidence_boost: 0.1  # nuclei 命中的规则置信度提升

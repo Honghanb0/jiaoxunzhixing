@@ -1,0 +1,59 @@
+# ---------------- 版本控制与编辑器 ----------------
+.git
+.gitignore
+.github
+.idea
+.vscode
+*.swp
+*~
+
+# ---------------- 本地构建产物（与 Linux 镜像无关，且体积大） ----------------
+bin/
+security-agent.exe
+security-agent.exe~
+sa_*.exe
+sa_*.exe~
+*.exe
+*.exe~
+*.dll
+*.so
+
+# ---------------- 运行期日志 / 缓存（避免污染镜像 & 泄露路径信息） ----------------
+logs/
+*.log
+*.err
+run.log
+run.err.log
+sa_ai.log
+sa_v3_run.log
+server.log
+server_verify.log
+verify_out.log
+__pycache__/
+*.pyc
+*.pyo
+
+# ---------------- 密钥与本地配置（严禁打进镜像） ----------------
+# 说明：真实配置通过 docker-compose 卷挂载或环境变量注入；
+# 镜像内仅保留 config.yaml.example 作为兜底。
+config.yaml
+.env
+.env.*
+*.pem
+*.key
+
+# ---------------- 与运行无关的资产 ----------------
+verify_site/
+wanpinglingtan/
+docs/
+src/
+tools/
+request.txt
+logo.jpeg
+background.png
+*.md
+
+# ---------------- CI/平台无关文件 ----------------
+docker-compose.yaml
+Dockerfile
+.dockerignore

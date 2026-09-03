@@ -29,22 +29,26 @@ func (r *InspectionRuleRepository) Create(rule *models.InspectionRule) error {
 	rule.UpdatedAt = time.Now()
 
 	query := `CREATE (n:InspectionRule {
-		id: $id, name: $name, domain_id: $domain_id, enabled: $enabled, schedule: $schedule,
-		provider: $provider, model: $model, prompt_template: $prompt_template,
+		id: $id, name: $name, domain_id: $domain_id, domain_ids: $domain_ids, enabled: $enabled, schedule: $schedule,
 		severity_threshold: $severity_threshold, run_scan: $run_scan,
 		retry_count: $retry_count, retry_backoff_sec: $retry_backoff_sec,
 		alert_on_failure: $alert_on_failure, created_at: datetime($created_at), updated_at: datetime($updated_at)
 	})`
 
+	domainIDs := rule.EffectiveDomainIDs()
+	// DomainID 作为主域名（第一个）持久化，保持向后兼容
+	primaryDomainID := rule.DomainID
+	if primaryDomainID == "" && len(domainIDs) > 0 {
+		primaryDomainID = domainIDs[0]
+	}
 	session := r.store.Session()
 	defer session.Close()
 	_, err := session.Run(query, map[string]any{
-		"id": rule.ID, "name": rule.Name, "domain_id": rule.DomainID, "enabled": rule.Enabled,
-		"schedule": rule.Schedule, "provider": rule.Provider, "model": rule.Model,
-		"prompt_template": rule.PromptTemplate, "severity_threshold": rule.SeverityThreshold,
+		"id": rule.ID, "name": rule.Name, "domain_id": primaryDomainID, "domain_ids": domainIDs, "enabled": rule.Enabled,
+		"schedule": rule.Schedule, "severity_threshold": rule.SeverityThreshold,
 		"run_scan": rule.RunScan, "retry_count": rule.RetryCount, "retry_backoff_sec": rule.RetryBackoffSec,
 		"alert_on_failure": rule.AlertOnFailure,
-		"created_at": rule.CreatedAt.Format(time.RFC3339), "updated_at": rule.UpdatedAt.Format(time.RFC3339),
+		"created_at":       rule.CreatedAt.Format(time.RFC3339), "updated_at": rule.UpdatedAt.Format(time.RFC3339),
 	})
 	return err
 }
@@ -98,18 +102,21 @@ func (r *InspectionRuleRepository) listByQuery(query string, params map[string]a
 
 func (r *InspectionRuleRepository) Update(rule *models.InspectionRule) error {
 	rule.UpdatedAt = time.Now()
+	domainIDs := rule.EffectiveDomainIDs()
+	primaryDomainID := rule.DomainID
+	if primaryDomainID == "" && len(domainIDs) > 0 {
+		primaryDomainID = domainIDs[0]
+	}
 	query := `MATCH (n:InspectionRule {id: $id})
-		SET n.name=$name, n.domain_id=$domain_id, n.enabled=$enabled, n.schedule=$schedule,
-		    n.provider=$provider, n.model=$model, n.prompt_template=$prompt_template,
+		SET n.name=$name, n.domain_id=$domain_id, n.domain_ids=$domain_ids, n.enabled=$enabled, n.schedule=$schedule,
 		    n.severity_threshold=$severity_threshold, n.run_scan=$run_scan,
 		    n.retry_count=$retry_count, n.retry_backoff_sec=$retry_backoff_sec,
 		    n.alert_on_failure=$alert_on_failure, n.updated_at=datetime($updated_at)`
 	session := r.store.Session()
 	defer session.Close()
 	_, err := session.Run(query, map[string]any{
-		"id": rule.ID, "name": rule.Name, "domain_id": rule.DomainID, "enabled": rule.Enabled,
-		"schedule": rule.Schedule, "provider": rule.Provider, "model": rule.Model,
-		"prompt_template": rule.PromptTemplate, "severity_threshold": rule.SeverityThreshold,
+		"id": rule.ID, "name": rule.Name, "domain_id": primaryDomainID, "domain_ids": domainIDs, "enabled": rule.Enabled,
+		"schedule": rule.Schedule, "severity_threshold": rule.SeverityThreshold,
 		"run_scan": rule.RunScan, "retry_count": rule.RetryCount, "retry_backoff_sec": rule.RetryBackoffSec,
 		"alert_on_failure": rule.AlertOnFailure, "updated_at": rule.UpdatedAt.Format(time.RFC3339),
 	})
@@ -132,7 +139,7 @@ func (r *InspectionRuleRepository) UpdateRunTimes(id string, lastRun, nextRun *t
 	session := r.store.Session()
 	defer session.Close()
 	_, err := session.Run(query, map[string]any{
-		"id":      id,
+		"id":       id,
 		"last_run": nullableTime(lastRun),
 		"next_run": nullableTime(nextRun),
 	})
@@ -150,18 +157,20 @@ func (r *InspectionRuleRepository) nodeToRule(node neo4j.Node) *models.Inspectio
 	props := node.Props
 	rule := &models.InspectionRule{
 		ID: ruleStr(props, "id"), Name: ruleStr(props, "name"), DomainID: ruleStr(props, "domain_id"),
-		Enabled:          getBool(props, "enabled"),
-		Schedule:         ruleStr(props, "schedule"),
-		Provider:         ruleStr(props, "provider"),
-		Model:            ruleStr(props, "model"),
-		PromptTemplate:   ruleStr(props, "prompt_template"),
+		DomainIDs:         getStringSlice(props, "domain_ids"),
+		Enabled:           getBool(props, "enabled"),
+		Schedule:          ruleStr(props, "schedule"),
 		SeverityThreshold: ruleStr(props, "severity_threshold"),
-		RunScan:          getBool(props, "run_scan"),
-		RetryCount:       getInt(props, "retry_count"),
-		RetryBackoffSec:  getInt(props, "retry_backoff_sec"),
-		AlertOnFailure:   getBool(props, "alert_on_failure"),
-		CreatedAt:        getTimeVal(props, "created_at"),
-		UpdatedAt:        getTimeVal(props, "updated_at"),
+		RunScan:           getBool(props, "run_scan"),
+		RetryCount:        getInt(props, "retry_count"),
+		RetryBackoffSec:   getInt(props, "retry_backoff_sec"),
+		AlertOnFailure:    getBool(props, "alert_on_failure"),
+		CreatedAt:         getTimeVal(props, "created_at"),
+		UpdatedAt:         getTimeVal(props, "updated_at"),
+	}
+	// 兼容旧数据：若未存 domain_ids 但有 domain_id，补成单元素列表
+	if len(rule.DomainIDs) == 0 && rule.DomainID != "" {
+		rule.DomainIDs = []string{rule.DomainID}
 	}
 	if t := timeValPtr(props, "last_run_at"); t != nil {
 		rule.LastRunAt = t
@@ -209,7 +218,8 @@ func (r *InspectionRecordRepository) Create(rec *models.InspectionRecord) error 
 		id: $id, rule_id: $rule_id, rule_name: $rule_name, domain_id: $domain_id, domain_name: $domain_name,
 		scan_job_id: $scan_job_id, triggered_by: $triggered_by, provider: $provider, model: $model,
 		status: $status, risk_level: $risk_level, summary: $summary, result_json: $result_json,
-		raw_response: $raw_response, findings_count: $findings_count, high_count: $high_count,
+		raw_response: $raw_response, 
+		findings_count: $findings_count, high_count: $high_count,
 		medium_count: $medium_count, low_count: $low_count, error: $error, retry_count: $retry_count,
 		started_at: datetime($started_at), created_at: datetime($created_at)
 	})`
@@ -220,6 +230,7 @@ func (r *InspectionRecordRepository) Create(rec *models.InspectionRecord) error 
 		"domain_name": rec.DomainName, "scan_job_id": rec.ScanJobID, "triggered_by": rec.TriggeredBy,
 		"provider": rec.Provider, "model": rec.Model, "status": rec.Status, "risk_level": rec.RiskLevel,
 		"summary": rec.Summary, "result_json": rec.ResultJSON, "raw_response": rec.RawResponse,
+		
 		"findings_count": rec.FindingsCount, "high_count": rec.HighCount, "medium_count": rec.MediumCount,
 		"low_count": rec.LowCount, "error": rec.Error, "retry_count": rec.RetryCount,
 		"started_at": rec.StartedAt.Format(time.RFC3339), "created_at": rec.CreatedAt.Format(time.RFC3339),
@@ -231,7 +242,8 @@ func (r *InspectionRecordRepository) Create(rec *models.InspectionRecord) error 
 func (r *InspectionRecordRepository) Update(rec *models.InspectionRecord) error {
 	query := `MATCH (n:InspectionRecord {id: $id})
 		SET n.status=$status, n.risk_level=$risk_level, n.summary=$summary, n.result_json=$result_json,
-		    n.raw_response=$raw_response, n.findings_count=$findings_count, n.high_count=$high_count,
+		    n.raw_response=$raw_response, 
+		    n.findings_count=$findings_count, n.high_count=$high_count,
 		    n.medium_count=$medium_count, n.low_count=$low_count, n.error=$error, n.retry_count=$retry_count,
 		    n.provider=$provider, n.model=$model, n.scan_job_id=$scan_job_id,
 		    n.completed_at=CASE WHEN $completed_at IS NULL THEN NULL ELSE datetime($completed_at) END`
@@ -239,10 +251,12 @@ func (r *InspectionRecordRepository) Update(rec *models.InspectionRecord) error 
 	defer session.Close()
 	_, err := session.Run(query, map[string]any{
 		"id": rec.ID, "status": rec.Status, "risk_level": rec.RiskLevel, "summary": rec.Summary,
-		"result_json": rec.ResultJSON, "raw_response": rec.RawResponse, "findings_count": rec.FindingsCount,
-		"high_count": rec.HighCount, "medium_count": rec.MediumCount, "low_count": rec.LowCount,
-		"error": rec.Error, "retry_count": rec.RetryCount, "provider": rec.Provider, "model": rec.Model,
-		"scan_job_id": rec.ScanJobID, "completed_at": nullableTime(rec.CompletedAt),
+		"result_json": rec.ResultJSON, "raw_response": rec.RawResponse,
+		
+		"findings_count": rec.FindingsCount, "high_count": rec.HighCount, "medium_count": rec.MediumCount,
+		"low_count": rec.LowCount, "error": rec.Error, "retry_count": rec.RetryCount,
+		"provider": rec.Provider, "model": rec.Model, "scan_job_id": rec.ScanJobID,
+		"completed_at": nullableTime(rec.CompletedAt),
 	})
 	return err
 }

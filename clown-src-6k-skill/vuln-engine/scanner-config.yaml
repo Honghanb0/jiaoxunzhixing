@@ -1,0 +1,269 @@
+# =============================================================================
+# 企业级漏洞发现引擎 — 扫描配置
+# Comprehensive Vulnerability Discovery Engine — Scanner Configuration
+# =============================================================================
+# 支持 SAST / DAST / IAST 三种模式，可按目标类型灵活切换
+# 与现有 Go 后端 (internal/scanner/) 无缝集成
+# =============================================================================
+
+version: "1.0.0"
+name: "clown-vuln-engine"
+description: "企业级漏洞发现引擎，融合 SAST/DAST/IAST 方法论，基于 40+ SRC 实战规则库"
+
+# -----------------------------------------------------------------------------
+# 扫描模式配置
+# -----------------------------------------------------------------------------
+modes:
+  # DAST: 黑盒动态扫描，对线上目标发请求、分析响应
+  dast:
+    enabled: true
+    description: "Dynamic Application Security Testing — 黑盒动态扫描"
+    engine: "crawler+detector"
+    max_pages: 200
+    max_depth: 5
+    concurrency: 10
+    request_timeout_seconds: 15
+    user_agent: "Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 10.0; WOW64; Trident/7.0; .NET4.0C; .NET4.0E; Tablet PC 2.0)"
+    follow_redirects: true
+    max_redirects: 5
+    verify_ssl: false
+    rate_limit_per_second: 20
+    # WAF 绕过策略
+    waf_bypass:
+      enabled: true
+      techniques:
+        - "url_double_encode"
+        - "null_byte"
+        - "unicode_escape"
+        - "case_mixing"
+        - "comment_injection"
+        - "whitespace_substitution"
+        - "header_mutation"
+        - "chunked_encoding"
+      fallback_to_slow: true  # 被拦截时降速重试
+
+  # SAST: 白盒静态分析，扫描源码、配置文件、依赖清单
+  sast:
+    enabled: true
+    description: "Static Application Security Testing — 白盒静态分析"
+    source_paths:
+      - "**/*.go"
+      - "**/*.py"
+      - "**/*.java"
+      - "**/*.js"
+      - "**/*.ts"
+      - "**/*.php"
+      - "**/*.rb"
+      - "**/*.cs"
+    config_paths:
+      - "**/.env"
+      - "**/config.yaml"
+      - "**/config.json"
+      - "**/*.properties"
+      - "**/docker-compose*.yml"
+      - "**/Dockerfile*"
+    dependency_manifests:
+      - "package.json"
+      - "requirements.txt"
+      - "pom.xml"
+      - "build.gradle"
+      - "go.mod"
+      - "Gemfile"
+      - "composer.json"
+    exclude_paths:
+      - "**/node_modules/**"
+      - "**/vendor/**"
+      - "**/.git/**"
+      - "**/dist/**"
+      - "**/build/**"
+    max_file_size_mb: 10
+    secret_detection: true
+    hardcoded_keywords:
+      - "api_key"
+      - "secret"
+      - "password"
+      - "token"
+      - "private_key"
+      - "access_key"
+
+  # IAST: 交互式安全测试，运行时插桩（需 Agent 注入）
+  iast:
+    enabled: false
+    description: "Interactive Application Security Testing — 交互式运行时测试"
+    agent_endpoint: "http://127.0.0.1:8080/iast"
+    instrumentation:
+      - "taint_tracking"
+      - "hook_database_queries"
+      - "hook_command_exec"
+      - "hook_file_operations"
+      - "hook_deserialization"
+      - "hook_http_client"
+    sampling_rate: 1.0  # 100% 采样
+    max_trace_depth: 10
+
+# -----------------------------------------------------------------------------
+# 漏洞检测规则配置
+# -----------------------------------------------------------------------------
+rules:
+  directory: "rules/"
+  auto_reload: false
+  enabled_categories:
+    # OWASP Top 10 (2021) 全覆盖
+    - "A01-broken-access-control"
+    - "A02-cryptographic-failures"
+    - "A03-injection"
+    - "A04-insecure-design"
+    - "A05-security-misconfiguration"
+    - "A06-vulnerable-components"
+    - "A07-auth-failures"
+    - "A08-software-data-integrity"
+    - "A09-logging-monitoring-failures"
+    - "A10-ssrf"
+    # 扩展类别
+    - "xss"
+    - "xxe"
+    - "deserialization"
+    - "file-upload"
+    - "command-injection"
+    - "path-traversal"
+    - "csrf"
+    - "open-redirect"
+    - "ssti"
+    - "ssrf"
+    - "jndi-injection"
+    - "prototype-pollution"
+    - "cache-poisoning"
+    - "http-smuggling"
+    - "race-condition"
+    - "subdomain-takeover"
+    - "graphql"
+    - "oauth-jwt"
+    - "websocket"
+    - "api-gateway"
+    - "dependency-confusion"
+    - "logic-flaw"
+    - "info-leak"
+    - "sensitive-file"
+  # 置信度阈值：低于此值的发现仅记录，不上报
+  confidence_threshold:
+    high: 0.85
+    medium: 0.60
+    low: 0.30
+  # 多层确认机制：独立信号命中数 ≥ min_signals 才上报
+  multi_layer_confirmation:
+    enabled: true
+    default_min_signals: 2
+    high_specificity_single_hit: true  # 高特异性信号（如 SQL 报错回显）单命中即报
+  # 误报过滤器
+  false_positive_filters:
+    exclude_status_codes: [404]
+    require_http_200_for_files: true
+    max_duplicate_urls: 1
+    content_validation: true  # 验证响应内容与漏洞匹配
+
+# -----------------------------------------------------------------------------
+# CVSS 评分配置
+# -----------------------------------------------------------------------------
+cvss:
+  version: "3.1"
+  base_score_threshold:
+    critical: 9.0
+    high: 7.0
+    medium: 4.0
+    low: 0.1
+  # 环境因子：根据目标业务类型调整
+  environmental_factors:
+    financial:
+      confidentiality_requirement: "H"
+      integrity_requirement: "H"
+      availability_requirement: "H"
+    healthcare:
+      confidentiality_requirement: "H"
+      integrity_requirement: "H"
+      availability_requirement: "H"
+    government:
+      confidentiality_requirement: "H"
+      integrity_requirement: "H"
+      availability_requirement: "M"
+    e-commerce:
+      confidentiality_requirement: "H"
+      integrity_requirement: "H"
+      availability_requirement: "M"
+    general:
+      confidentiality_requirement: "M"
+      integrity_requirement: "M"
+      availability_requirement: "M"
+
+# -----------------------------------------------------------------------------
+# 报告配置
+# -----------------------------------------------------------------------------
+reporting:
+  formats:
+    - "markdown"
+    - "json"
+    - "html"
+  output_directory: "reports/"
+  template_align: "rules/vuln-report-format.md"  # 对齐 SRC 报告格式
+  include_poc: true
+  include_cvss_vector: true
+  include_remediation: true
+  dedup_same_url_same_type: true
+  # 严重等级过滤（与 SRC 报告格式对齐）
+  min_severity: "medium"  # low/info 仅在 JSON 中记录，不落 Markdown 报告
+  # 自动工单集成
+  ticketing:
+    enabled: false
+    webhook_url: ""
+    ticket_fields:
+      priority: "cvss_based"
+      labels: ["security", "auto-generated"]
+
+# -----------------------------------------------------------------------------
+# 数据库集成（安全数据库）
+# -----------------------------------------------------------------------------
+security_databases:
+  osv:
+    enabled: true
+    api_url: "https://api.osv.dev/v1/query"
+    local_cache: "data/osv-cache.json"
+    cache_ttl_hours: 168  # 7 天
+  cve:
+    enabled: true
+    api_url: "https://services.nvd.nist.gov/rest/json/cves/2.0"
+    api_key: ""  # 可选，有 key 时限速更宽松
+  cnvd:
+    enabled: false
+    api_url: ""
+  cnnvd:
+    enabled: false
+    api_url: ""
+  exploit_db:
+    enabled: true
+    url: "https://www.exploit-db.com"
+
+# -----------------------------------------------------------------------------
+# 框架集成
+# -----------------------------------------------------------------------------
+framework_integrations:
+  nuclei:
+    enabled: true
+    binary_path: "nuclei"
+    template_directory: "~/.nuclei-templates"
+    severity_filter: ["critical", "high", "medium"]
+    rate_limit: 50
+    tags: ["cve", "exposure", "misconfig"]
+  burp:
+    enabled: false
+    proxy_url: "http://127.0.0.1:8081"
+    rest_api_key: ""
+  sqlmap:
+    enabled: true
+    binary_path: "sqlmap"
+    level: 3
+    risk: 2
+    batch: true
+    tamper_scripts: ["space2comment", "charunicodeencode"]
+  metasploit:
+    enabled: false
+    rpc_url: "http://127.0.0.1:55553"
+    rpc_password: ""

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
+	"security-agent/internal/agent"
 	"security-agent/internal/ai"
 	"security-agent/internal/api"
 	"security-agent/internal/config"
@@ -101,6 +102,7 @@ func main() {
 	// 多模型路由中心与扫描引擎在进程内保持单例：
 	// HTTP 层、扫描引擎、定时调度器共用同一份实例（含 HTTP 连接池与运行时切换状态）。
 	aiMgr := ai.NewManager(&cfg.AI)
+
 	engine := scanner.NewEngine(cfg, store, aiMgr)
 
 	// 回收上次运行遗留的僵死任务（否则会永远停在 running），并启动超时看门狗
@@ -120,7 +122,10 @@ func main() {
 		storage.NewAlertRepository(store))
 	sched := scheduler.NewSchedulerWithInspection(&cfg.Scheduler, store, engine, alertSvc, aiMgr)
 
-	server := api.NewServerWithEngine(cfg, store, engine, aiMgr, sched)
+	// 自主智能体（多轮工具调用 + 自主规划）：与 HTTP 层/调度器共享同一份 aiMgr/engine/sched
+	agentMgr := agent.NewManager(&cfg.Agent, aiMgr, store, engine, sched)
+
+	server := api.NewServerWithEngine(cfg, store, engine, aiMgr, sched, agentMgr)
 
 	if err := sched.Start(); err != nil {
 		log.Printf("Warning: Failed to start scheduler: %v", err)

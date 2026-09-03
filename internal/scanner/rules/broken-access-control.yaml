@@ -1,0 +1,99 @@
+id: "rule-broken-access-control-idor"
+name: "Broken Access Control (IDOR/BOLA/BFLA)"
+name_cn: "越权访问控制失效"
+description: "系统未正确验证用户权限，导致攻击者可通过修改对象 ID 访问或操作他人资源（IDOR），或访问未授权功能（BFLA）"
+
+owasp_category: "A01-broken-access-control"
+owasp_subcategory: "IDOR / BOLA / BFLA"
+cwe_id: "CWE-639"
+
+cvss:
+  vector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N"
+  base_score: 9.1
+  severity: "critical"
+
+detection:
+  methods: ["DAST", "IAST"]
+  dast_signals:
+    high_specificity:
+      - type: "cross_user_read"
+        pattern: "response_contains_other_user_data"
+        confidence: 0.95
+      - type: "cross_user_write"
+        pattern: "write_operation_succeeds_for_other_user_object"
+        confidence: 0.98
+    medium_specificity:
+      - type: "unauthenticated_access"
+        pattern: "protected_resource_accessible_without_auth"
+        confidence: 0.80
+      - type: "horizontal_escalation"
+        pattern: "same_privilege_level_accesses_others_objects"
+        confidence: 0.85
+    low_specificity:
+      - type: "predictable_id"
+        pattern: "sequential_or_guessable_object_ids"
+        confidence: 0.40
+  multi_layer:
+    enabled: true
+    min_signals: 2
+    high_specificity_skips_min: true
+  false_positive_filters:
+    - filter: "auth_required"
+      condition: "resource_requires_authentication_and_attacker_is_authenticated"
+      action: "downgrade"
+      target_confidence: "medium"
+    - filter: "public_resource"
+      condition: "resource_is_explicitly_public"
+      action: "discard"
+
+poc:
+  enabled: true
+  request_template: |
+    GET {{url}}/api/v1/users/{{victim_id}} HTTP/1.1
+    Host: {{host}}
+    Cookie: {{attacker_session_cookie}}
+    Authorization: Bearer {{attacker_token}}
+    User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)
+    Accept: application/json
+    Connection: close
+  payloads:
+    - name: "sequential_id"
+      value: "{{attacker_id + 1}}"
+      description: "顺序遍历相邻 ID"
+      risk: "low"
+    - name: "zero_id"
+      value: "0"
+      description: "尝试 ID=0（常见越权点）"
+      risk: "low"
+    - name: "negative_id"
+      value: "-1"
+      description: "尝试负 ID"
+      risk: "low"
+    - name: "other_user_id_from_response"
+      value: "{{id_extracted_from_list_response}}"
+      description: "从列表响应中提取他人 ID"
+      risk: "medium"
+  verification:
+    - type: "cross_user_data"
+      description: "响应中出现不属于当前用户的敏感数据"
+    - type: "write_success"
+      description: "写操作成功（先添加到他人名下→删除自己刚加的）"
+    - type: "baseline_compare"
+      description: "对比攻击者有权限的对象 vs 越权访问的对象内容差异"
+
+remediation:
+  priority: "P0"
+  summary: "每个请求都验证用户对目标资源的所有权/权限"
+  details:
+    - "实施对象级授权（OLAC）：每个 API 端点验证用户对目标对象的访问权"
+    - "使用不可预测的资源标识符（UUID 替代自增 ID）"
+    - "实施功能级访问控制（FLAC）：验证用户角色是否有权调用该功能"
+    - "拒绝所有未显式授权的访问（默认拒绝原则）"
+    - "记录访问控制失败日志，启用异常检测"
+  references:
+    - "https://owasp.org/Top10/A01_2021-Broken_Access_Control/"
+    - "https://cwe.mitre.org/data/definitions/639.html"
+
+knowledge_source:
+  file: "知识库/idor-test.md"
+  methodology: "src-value-hunting.md §3 越权/IDOR：基线→邻号/回包id→差分证明跨租户"

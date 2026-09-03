@@ -1,0 +1,52 @@
+[cli]
+installer = "internal"
+
+[marketplace]
+default_skills_installs_purged = true
+official_marketplace_auto_installed = true
+
+[[marketplace.sources]]
+name = "xAI Official"
+git = "https://github.com/xai-org/plugin-marketplace.git"
+
+[ui]
+max_thoughts_width = 120
+fork_secondary_model = "grok-4.5"
+yolo = false
+compact_mode = false
+permission_mode = "always-approve"
+
+[mcp_servers.playwright]
+command = "node"
+args = ['C:\Users\USER\.grok\bin\playwright-dual-slot.mjs']
+enabled = true
+startup_timeout_sec = 120
+tool_timeout_sec = 180
+
+[mcp_servers.fofa]
+command = 'C:\Users\USER\.local\bin\uv.exe'
+args = [
+    "run",
+    "--directory",
+    'C:\Users\USER\.grok\mcp-servers\fofa_MCP',
+    "python",
+    "fofa.py",
+]
+enabled = true
+startup_timeout_sec = 120
+tool_timeout_sec = 120
+
+[mcp_servers.fofa.env]
+FOFA_EMAIL = ""
+FOFA_KEY = ""
+FOFA_EMAIL_BACKUP = ""
+FOFA_KEY_BACKUP = ""
+FOFA_EMAIL_BACKUP2 = ""
+FOFA_KEY_BACKUP2 = ""
+
+[privacy]
+privacy_banner_acked = "2026-08-01T08:42:12Z"
+
+[models]
+default = "grok-4.6"
+default_reasoning_effort = "xhigh"

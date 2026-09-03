@@ -3,10 +3,12 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/spf13/viper"
+
 )
 
 type Config struct {
@@ -19,6 +21,14 @@ type Config struct {
 	Alerts    AlertsConfig    `mapstructure:"alerts"`
 	Logging   LoggingConfig   `mapstructure:"logging"`
 	Auth      AuthConfig      `mapstructure:"auth"`
+	Agent     AgentConfig     `mapstructure:"agent"`
+}
+
+// AgentConfig 自主智能体（多轮工具调用 + 自主规划）配置。
+type AgentConfig struct {
+	Enabled  bool `mapstructure:"enabled"`   // 是否启用自主智能体
+	MaxTurns int  `mapstructure:"max_turns"` // 单任务最大推理轮次（防失控），默认 24
+	Model    string `mapstructure:"model"`   // 可选：覆盖默认模型供应商
 }
 
 type ServerConfig struct {
@@ -150,8 +160,24 @@ func Load(configPath string) (*Config, error) {
 	} else {
 		v.SetConfigName("config")
 		v.SetConfigType("yaml")
+		// 跨平台搜索顺序：
+		//   1) 当前工作目录（开发态，Windows/Linux 通用）
+		//   2) ./config 子目录（仓库约定）
+		//   3) ./configs 子目录（部分发行版/团队习惯）
+		//   4) 可执行文件同级目录（服务化部署、工作目录不确定的场景）
+		//   5) /etc/security-agent（Linux 系统级配置约定；Windows 上该路径不存在，
+		//      viper 会安全跳过，不影响 Windows 行为）
+		//   6) $HOME/.security-agent（免 root 部署；Windows 上解析为用户目录，同样安全）
 		v.AddConfigPath(".")
 		v.AddConfigPath("./config")
+		v.AddConfigPath("./configs")
+		if exe, err := os.Executable(); err == nil {
+			v.AddConfigPath(filepath.Dir(exe))
+		}
+		v.AddConfigPath("/etc/security-agent")
+		if home, err := os.UserHomeDir(); err == nil {
+			v.AddConfigPath(filepath.Join(home, ".security-agent"))
+		}
 	}
 
 	// 读取环境变量并替换占位符
@@ -193,6 +219,7 @@ func Load(configPath string) (*Config, error) {
 	GlobalConfig = &cfg
 	return &cfg, nil
 }
+
 
 // normalizeAIConfig 补齐多模型配置的默认值，并把旧版扁平配置并入对应供应商。
 // 这样老配置（ai.provider + ai.api_key）无需修改即可继续工作。

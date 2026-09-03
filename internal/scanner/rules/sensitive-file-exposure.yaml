@@ -1,0 +1,109 @@
+id: "rule-sensitive-file-exposure"
+name: "Sensitive File Exposure"
+name_cn: "敏感文件暴露"
+description: "服务器上的敏感配置文件、备份文件、密钥文件可被未授权访问，泄露凭据、密钥、数据库连接串等关键信息"
+
+owasp_category: "A05-security-misconfiguration"
+owasp_subcategory: "Sensitive Files"
+cwe_id: "CWE-538"
+
+cvss:
+  vector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"
+  base_score: 7.5
+  severity: "high"
+
+detection:
+  methods: ["DAST", "SAST"]
+  dast_signals:
+    high_specificity:
+      - type: "sensitive_file_http_200"
+        pattern: "path_matches_sensitive_file_pattern_and_status_200"
+        confidence: 0.90
+      - type: "content_signals"
+        pattern: "(DB_PASSWORD|API_KEY|SECRET_KEY|PRIVATE KEY|BEGIN RSA|AKIA|password=|credentials)"
+        confidence: 0.95
+    medium_specificity:
+      - type: "backup_file"
+        pattern: "\\.(bak|backup|old|orig|swp|~|zip|tar\\.gz)$"
+        confidence: 0.75
+      - type: "config_file"
+        pattern: "(\\.env|wp-config|config\\.(yaml|json|yml|properties|xml))$"
+        confidence: 0.70
+    low_specificity:
+      - type: "path_exists"
+        pattern: "HTTP 200 on path"
+        confidence: 0.30
+  sast_patterns:
+    - language: "all"
+      pattern: "(DB_PASSWORD|API_KEY|SECRET_KEY|jwt_secret|private_key)"
+      confidence: 0.70
+  multi_layer:
+    enabled: true
+    min_signals: 1
+    high_specificity_skips_min: true
+  false_positive_filters:
+    - filter: "status_code"
+      condition: "status_code != 200"
+      action: "discard"
+    - filter: "empty_content"
+      condition: "content_length == 0 AND is_html"
+      action: "discard"
+
+poc:
+  enabled: true
+  request_template: |
+    GET {{url}}/{{sensitive_path}} HTTP/1.1
+    Host: {{host}}
+    User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)
+    Accept: */*
+    Connection: close
+  payloads:
+    - name: "env_file"
+      value: ".env"
+      description: "环境变量文件（含数据库/API 凭据）"
+      risk: "high"
+    - name: "git_config"
+      value: ".git/config"
+      description: "Git 配置泄露"
+      risk: "medium"
+    - name: "backup_sql"
+      value: "backup.sql"
+      description: "数据库备份文件"
+      risk: "critical"
+    - name: "private_key"
+      value: "id_rsa"
+      description: "SSH 私钥"
+      risk: "critical"
+    - name: "wp_config"
+      value: "wp-config.php"
+      description: "WordPress 配置（含数据库密码）"
+      risk: "high"
+    - name: "htpasswd"
+      value: ".htpasswd"
+      description: "Apache 密码文件"
+      risk: "high"
+  verification:
+    - type: "http_status"
+      description: "HTTP 状态码为 200"
+    - type: "content_check"
+      pattern: "password|secret|key|token|database"
+      description: "响应内容包含敏感关键词"
+    - type: "not_html_error"
+      description: "响应不是 HTML 错误页面"
+
+remediation:
+  priority: "P0"
+  summary: "禁止 Web 服务器直接访问敏感文件，使用白名单限制可访问路径"
+  details:
+    - "配置 Web 服务器（Nginx/Apache）禁止访问 .git、.env、*.sql、*.bak 等敏感路径"
+    - "敏感配置文件移出 Web 根目录"
+    - "定期扫描备份文件是否暴露"
+    - "使用 .htaccess / nginx location 规则拒绝访问隐藏文件"
+    - "配置安全响应头：X-Content-Type-Options: nosniff"
+  references:
+    - "https://owasp.org/Top10/A05_2021-Security_Misconfiguration/"
+    - "https://cwe.mitre.org/data/definitions/538.html"
+
+knowledge_source:
+  file: "知识库/info-leak-test.md"
+  methodology: "src-value-hunting.md §3 敏感路径 + 凭证泄露认钥闸"

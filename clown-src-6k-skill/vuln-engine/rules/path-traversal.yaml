@@ -1,0 +1,91 @@
+id: "rule-path-traversal"
+name: "Path Traversal / Local File Inclusion"
+name_cn: "路径穿越 / 本地文件包含"
+description: "文件下载、读取、包含功能未校验路径，攻击者可通过 ../ 序列访问任意文件"
+
+owasp_category: "A01-broken-access-control"
+owasp_subcategory: "Path Traversal"
+cwe_id: "CWE-22"
+
+cvss:
+  vector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"
+  base_score: 7.5
+  severity: "high"
+
+detection:
+  methods: ["DAST", "SAST"]
+  dast_signals:
+    high_specificity:
+      - type: "file_content_leaked"
+        pattern: "response_contains_etc_passwd_or_windows_system_files"
+        confidence: 0.95
+    medium_specificity:
+      - type: "traversal_pattern_in_response"
+        pattern: "file_not_found_for_normal_but_found_for_traversal"
+        confidence: 0.75
+    low_specificity:
+      - type: "file_parameter"
+        pattern: "(file|path|filename|dir|template|include|view|page)="
+        confidence: 0.30
+  sast_patterns:
+    - language: "php"
+      pattern: "include\\(\\$_|require\\(\\$_|file_get_contents\\(\\$_"
+      confidence: 0.85
+    - language: "java"
+      pattern: "new File\\(.*request\\.getParameter|FileInputStream\\(.*getParameter"
+      confidence: 0.80
+  multi_layer:
+    enabled: true
+    min_signals: 1
+    high_specificity_skips_min: true
+  false_positive_filters:
+    - filter: "content_validation"
+      condition: "no_sensitive_file_content_in_response"
+      action: "downgrade"
+      target_confidence: "low"
+
+poc:
+  enabled: true
+  request_template: |
+    GET {{url}}?{{param}}={{payload}} HTTP/1.1
+    Host: {{host}}
+    User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)
+    Accept: */*
+    Connection: close
+  payloads:
+    - name: "unix_passwd"
+      value: "../../../../etc/passwd"
+      description: "读取 /etc/passwd"
+      risk: "medium"
+    - name: "windows_winini"
+      value: "..\\..\\..\\windows\\win.ini"
+      description: "读取 Windows win.ini"
+      risk: "medium"
+    - name: "double_encoded"
+      value: "%2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fpasswd"
+      description: "URL 双重编码绕过"
+      risk: "medium"
+    - name: "absolute_path"
+      value: "/etc/passwd"
+      description: "绝对路径"
+      risk: "medium"
+  verification:
+    - type: "content_match"
+      pattern: "root:.*:0:0:|\\[fonts\\]|\\[extensions\\]"
+      description: "响应中出现系统文件内容"
+
+remediation:
+  priority: "P0"
+  summary: "禁止用户输入拼接文件路径，使用白名单映射"
+  details:
+    - "禁止直接拼接用户输入到文件路径"
+    - "使用文件 ID 映射实际路径，而非直接传路径"
+    - "对路径做规范化（realpath）后验证是否在允许目录内"
+    - "使用白名单允许的文件列表"
+  references:
+    - "https://owasp.org/Top10/A01_2021-Broken_Access_Control/"
+    - "https://cwe.mitre.org/data/definitions/22.html"
+
+knowledge_source:
+  file: "知识库/info-leak-test.md"
+  methodology: "src-value-hunting.md §3 穿越 fileKey/path/filename"

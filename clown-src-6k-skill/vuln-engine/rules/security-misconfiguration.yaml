@@ -1,0 +1,106 @@
+id: "rule-security-misconfiguration"
+name: "Security Misconfiguration"
+name_cn: "安全配置错误"
+description: "服务器、框架、应用使用默认或不安全配置，如暴露管理面板、调试接口、目录列表、默认凭据"
+
+owasp_category: "A05-security-misconfiguration"
+owasp_subcategory: "Misconfiguration"
+cwe_id: "CWE-16"
+
+cvss:
+  vector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+  base_score: 9.8
+  severity: "critical"
+
+detection:
+  methods: ["DAST", "SAST"]
+  dast_signals:
+    high_specificity:
+      - type: "exposed_admin_panel"
+        pattern: "wp-admin|/admin/login|/manager/html|/console/login|/actuator/env|/actuator/heapdump|swagger-ui\\.html|/debug/pprof"
+        confidence: 0.85
+      - type: "default_credentials_accepted"
+        pattern: "login_success_with_default_credentials"
+        confidence: 0.98
+      - type: "directory_listing"
+        pattern: "<title>Index of|Directory listing for"
+        confidence: 0.90
+    medium_specificity:
+      - type: "debug_mode_enabled"
+        pattern: "(Debug=True|APP_DEBUG=true|werkzeug debugger|debug_toolbar)"
+        confidence: 0.75
+      - type: "actuator_endpoints"
+        pattern: "/actuator/(env|heapdump|beans|mappings|configprops|threaddump)"
+        confidence: 0.80
+      - type: "swagger_exposed"
+        pattern: "swagger-ui\\.html|/v2/api-docs|/openapi\\.json"
+        confidence: 0.70
+    low_specificity:
+      - type: "server_version_disclosure"
+        pattern: "Server: Apache/[0-9]|X-Powered-By: PHP/[0-9]"
+        confidence: 0.40
+  multi_layer:
+    enabled: true
+    min_signals: 3
+    high_specificity_skips_min: true
+  false_positive_filters:
+    - filter: "auth_required"
+      condition: "endpoint_requires_authentication"
+      action: "downgrade"
+      target_confidence: "low"
+
+poc:
+  enabled: true
+  request_template: |
+    GET {{url}}/{{path}} HTTP/1.1
+    Host: {{host}}
+    User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)
+    Accept: */*
+    Connection: close
+  payloads:
+    - name: "spring_actuator_env"
+      value: "actuator/env"
+      description: "Spring Boot Actuator 暴露环境变量"
+      risk: "high"
+    - name: "spring_actuator_heapdump"
+      value: "actuator/heapdump"
+      description: "堆内存转储（含凭据）"
+      risk: "critical"
+    - name: "swagger_ui"
+      value: "swagger-ui.html"
+      description: "Swagger API 文档暴露"
+      risk: "medium"
+    - name: "debug_mode"
+      value: "debug=true"
+      description: "调试模式开启"
+      risk: "medium"
+    - name: "tomcat_manager"
+      value: "manager/html"
+      description: "Tomcat 管理面板"
+      risk: "high"
+  verification:
+    - type: "http_status"
+      description: "端点返回 200 且内容非空"
+    - type: "content_match"
+      pattern: "password|secret|token|datasource"
+      description: "响应中出现敏感配置"
+    - type: "default_login"
+      description: "使用默认凭据登录成功"
+
+remediation:
+  priority: "P0"
+  summary: "移除或禁用不必要的功能和端点，启用安全配置基线"
+  details:
+    - "生产环境禁用调试模式（Debug=False, APP_DEBUG=false）"
+    - "移除 Swagger/Actuator/管理面板或限制内网访问"
+    - "禁用目录列表（Apache: Options -Indexes; Nginx: autoindex off）"
+    - "删除默认页面和示例应用"
+    - "配置安全响应头（HSTS, CSP, X-Frame-Options, X-Content-Type-Options）"
+    - "使用自动化配置扫描（CIS Benchmark）"
+  references:
+    - "https://owasp.org/Top10/A05_2021-Security_Misconfiguration/"
+    - "https://cwe.mitre.org/data/definitions/16.html"
+
+knowledge_source:
+  file: "知识库/info-leak-test.md"
+  methodology: "知识库/info-leak-test.md §五 公网暴露中间件默认口"

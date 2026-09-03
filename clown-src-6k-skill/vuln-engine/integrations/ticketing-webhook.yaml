@@ -1,0 +1,92 @@
+# =============================================================================
+# 工单系统集成配置
+# =============================================================================
+# 支持 Jira / Linear / GitHub Issues / GitLab Issues / 自定义 Webhook
+# 扫描发现的漏洞可自动创建工单，实现漏洞生命周期管理
+# =============================================================================
+
+version: "1.0"
+description: "漏洞工单系统集成配置"
+
+# 通用 Webhook 配置
+webhook:
+  enabled: false
+  # 支持多种工单系统
+  providers:
+    jira:
+      enabled: false
+      api_url: "https://your-domain.atlassian.net/rest/api/3"
+      project_key: "SEC"
+      issue_type: "Bug"
+      auth_type: "basic"  # basic / bearer
+      username: ""
+      api_token: ""
+      # 字段映射
+      field_mapping:
+        summary: "{{title}}"
+        description: "{{description}}\n\n**PoC:**\n```http\n{{poc}}\n```"
+        priority: "{{cvss_priority}}"
+        labels: ["security", "auto-generated", "{{severity}}"]
+        customfield_vuln_url: "{{url}}"
+        customfield_cvss_score: "{{cvss_score}}"
+        customfield_cve_ids: "{{cve_ids}}"
+
+    linear:
+      enabled: false
+      api_url: "https://api.linear.app/graphql"
+      api_key: ""
+      team_id: ""
+      label_ids: []
+      state_id: ""
+
+    github:
+      enabled: false
+      api_url: "https://api.github.com/repos/OWNER/REPO"
+      token: ""
+      labels: ["security", "auto-generated"]
+      assignees: []
+
+    gitlab:
+      enabled: false
+      api_url: "https://gitlab.com/api/v4"
+      project_id: ""
+      token: ""
+      labels: ["security", "auto-generated"]
+
+    custom:
+      enabled: false
+      webhook_url: ""
+      auth_header: "Authorization: Bearer {{token}}"
+      payload_template: |
+        {
+          "title": "{{title}}",
+          "severity": "{{severity}}",
+          "confidence": "{{confidence}}",
+          "url": "{{url}}",
+          "description": "{{description}}",
+          "poc": "{{poc}}",
+          "remediation": "{{remediation}}",
+          "cve_ids": {{cve_ids_json}},
+          "cvss_score": {{cvss_score}},
+          "cvss_vector": "{{cvss_vector}}"
+        }
+
+# 工单创建策略
+creation_policy:
+  # 仅创建 medium 及以上严重等级的工单
+  min_severity: "medium"
+  # 仅创建 medium 及以上置信度的工单
+  min_confidence: "medium"
+  # 去重：同一 URL + 同一类型不重复创建工单
+  dedup_same_url_same_type: true
+  # 限流：每分钟最多创建 10 个工单
+  rate_limit_per_minute: 10
+  # 批量模式：扫描完成后批量创建
+  batch_mode: true
+
+# CVSS 到工单优先级映射
+cvss_priority_mapping:
+  critical: "Highest"
+  high: "High"
+  medium: "Medium"
+  low: "Lowest"

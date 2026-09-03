@@ -70,6 +70,7 @@ type Vulnerability struct {
 	Type        string    `json:"type" neo4j:"type"`               // xss, sqli, csrf, etc.
 	Name        string    `json:"name" neo4j:"name"`
 	Severity    string    `json:"severity" neo4j:"severity"`       // high, medium, low
+	Confidence  string    `json:"confidence,omitempty" neo4j:"confidence"` // low, medium, high — 多层确认后的置信度
 	Description string    `json:"description" neo4j:"description"`
 	Evidence     string    `json:"evidence" neo4j:"evidence"`       // 证据
 	URL         string    `json:"url" neo4j:"url"`
@@ -80,6 +81,9 @@ type Vulnerability struct {
 	// Fingerprint 去重指纹：维度为「域名 + 漏洞类型 + 受影响 URL + 参数」。
 	// 由 VulnFingerprint 计算；历史存量（未落库指纹）为 ""，统计时回退到节点 id 单算，互不影响。
 	Fingerprint string `json:"fingerprint,omitempty" neo4j:"fingerprint"`
+	// OSV Schema 风格扩展字段：关联 CVE 列表与受影响版本范围
+	CVEIDs           []string `json:"cve_ids,omitempty" neo4j:"cve_ids"`
+	AffectedVersions string   `json:"affected_versions,omitempty" neo4j:"affected_versions"`
 }
 
 // VulnFingerprint 计算漏洞唯一标识（去重指纹）。

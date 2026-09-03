@@ -57,8 +57,9 @@ type CriticalVulnerability struct {
 
 // MatchedComponent 单次命中结果。
 type MatchedComponent struct {
-	Rule    FingerprintRule
-	Matched string // 命中的维度，如 "body_keywords"
+	Rule       FingerprintRule
+	Matched    string // 命中的维度，如 "body_keywords" 或多维度 "header_server+cookie_keywords"
+	Confidence string // 置信度：high / medium / low
 }
 
 // LoadEmbeddedFingerprintRules 读取内嵌指纹库（编译期嵌入，无需外部路径）。
@@ -73,7 +74,10 @@ func LoadEmbeddedFingerprintRules() ([]FingerprintRule, error) {
 }
 
 // MatchFingerprint 基于 HTTP 响应（Server 头 / 其它响应头 / 响应体 / Cookie / 标题）识别组件。
-// 不发起额外请求：path_keywords 仅按当前页面路径做弱匹配。
+// 采用加权匹配机制降低误报率：
+//   - 高特异性维度 (header_server, cookie_keywords): 单维度命中即可上报 → high confidence
+//   - 中特异性维度 (header_custom, body_keywords, title_keywords): 需 ≥2 个独立维度命中才上报 → medium confidence
+//   - 弱特异性维度 (path_keywords): 仅作为辅助信号，单独命中不上报
 func MatchFingerprint(page *PageInfo, rules []FingerprintRule) []MatchedComponent {
 	if len(rules) == 0 || page == nil {
 		return nil
@@ -87,24 +91,75 @@ func MatchFingerprint(page *PageInfo, rules []FingerprintRule) []MatchedComponen
 
 	var out []MatchedComponent
 	for _, rule := range rules {
-		var hit string
 		r := rule.MatchRules
-		switch {
-		case matchAnySubstr(server, r.HeaderServer):
-			hit = "header_server"
-		case matchAnyRegex(headerBlob, r.HeaderCustom):
-			hit = "header_custom"
-		case matchAnySubstr(body, r.BodyKeywords):
-			hit = "body_keywords"
-		case matchAnySubstr(cookies, r.CookieKeywords):
-			hit = "cookie_keywords"
-		case matchAnySubstr(title, r.TitleKeywords):
-			hit = "title_keywords"
-		case matchAnySubstr(url, r.PathKeywords):
-			hit = "path_keywords"
+		// 收集所有命中的维度
+		var hits []string
+		if matchAnySubstr(server, r.HeaderServer) {
+			hits = append(hits, "header_server")
 		}
-		if hit != "" {
-			out = append(out, MatchedComponent{Rule: rule, Matched: hit})
+		if matchAnyRegex(headerBlob, r.HeaderCustom) {
+			hits = append(hits, "header_custom")
+		}
+		if matchAnySubstr(body, r.BodyKeywords) {
+			hits = append(hits, "body_keywords")
+		}
+		if matchAnySubstr(cookies, r.CookieKeywords) {
+			hits = append(hits, "cookie_keywords")
+		}
+		if matchAnySubstr(title, r.TitleKeywords) {
+			hits = append(hits, "title_keywords")
+		}
+		pathHit := matchAnySubstr(url, r.PathKeywords)
+
+		if len(hits) == 0 && !pathHit {
+			continue // 无任何命中
+		}
+
+		// 加权决策：判断是否达到上报阈值
+		shouldReport := false
+		confidence := "low"
+		highSpecHits := 0
+		mediumSpecHits := 0
+		for _, h := range hits {
+			switch h {
+			case "header_server", "cookie_keywords":
+				highSpecHits++
+			case "header_custom", "body_keywords", "title_keywords":
+				mediumSpecHits++
+			}
+		}
+
+		if highSpecHits >= 1 {
+			// 高特异性维度（Server 头 / Cookie）单维度命中即可上报
+			shouldReport = true
+			confidence = "high"
+		} else if mediumSpecHits >= 2 {
+			// 中特异性维度需要 ≥2 个独立维度命中
+			shouldReport = true
+			confidence = "high"
+		} else if mediumSpecHits == 1 {
+			// 单中特异性维度 + path_keywords 辅助 → medium 上报
+			if pathHit {
+				shouldReport = true
+				confidence = "medium"
+			}
+		}
+		// path_keywords 单独命中不上报（弱特异性）
+
+		if shouldReport {
+			// 记录主要命中维度
+			mainHit := ""
+			if len(hits) > 0 {
+				mainHit = strings.Join(hits, "+")
+			}
+			if pathHit {
+				if mainHit != "" {
+					mainHit += "+path_keywords"
+				} else {
+					mainHit = "path_keywords"
+				}
+			}
+			out = append(out, MatchedComponent{Rule: rule, Matched: mainHit, Confidence: confidence})
 		}
 	}
 	return out
@@ -122,6 +177,8 @@ func ComponentToVulnerability(m MatchedComponent, page *PageInfo) *models.Vulner
 	}
 
 	desc := fmt.Sprintf("识别到组件 %s（分类：%s / 厂商：%s）", name, rule.Category, rule.Vendor)
+	// OSV Schema 风格：收集关联 CVE 列表
+	var cveIDs []string
 	if len(rule.Vulnerabilities) > 0 {
 		var sb strings.Builder
 		sb.WriteString(desc + "。关联已知漏洞：")
@@ -130,11 +187,14 @@ func ComponentToVulnerability(m MatchedComponent, page *PageInfo) *models.Vulner
 				sb.WriteString("；")
 			}
 			fmt.Fprintf(&sb, "%s %s", c.CVEID, c.VulnName)
+			if c.CVEID != "" {
+				cveIDs = append(cveIDs, c.CVEID)
+			}
 		}
 		desc = sb.String()
 	}
 
-	evidence := fmt.Sprintf("命中维度=%s", m.Matched)
+	evidence := fmt.Sprintf("命中维度=%s；置信度=%s", m.Matched, m.Confidence)
 	if rule.AffectedVersions != "" {
 		evidence += "；影响版本：" + rule.AffectedVersions
 	}
@@ -145,13 +205,16 @@ func ComponentToVulnerability(m MatchedComponent, page *PageInfo) *models.Vulner
 	}
 
 	return &models.Vulnerability{
-		Type:        "fingerprint",
-		Name:        "组件识别: " + name,
-		Severity:    normalizeFingerprintRisk(rule.RiskLevel),
-		Description: desc,
-		Evidence:    evidence,
-		URL:         page.URL,
-		Remediation: remediation,
+		Type:             "fingerprint",
+		Name:             "组件识别: " + name,
+		Severity:         normalizeFingerprintRisk(rule.RiskLevel),
+		Confidence:       m.Confidence,
+		Description:      desc,
+		Evidence:         evidence,
+		URL:              page.URL,
+		Remediation:      remediation,
+		CVEIDs:           cveIDs,
+		AffectedVersions: rule.AffectedVersions,
 	}
 }
 

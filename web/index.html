@@ -14,7 +14,24 @@
         
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background: #0f172a;
+            /* 全站背景：background.png（已压缩为 1920x1078 / 1.6MB，存于 web/ 目录）。
+               资源引用方式说明（Windows / Linux 通用）：
+               1) 使用以站点根为起点的绝对 URL "/web/background.png"，对应后端
+                  router.Static("/web", webRoot) 静态路由（webRoot 指向 web/ 目录）；
+               2) 不使用相对路径：SPA 的 NoRoute 兜底会让同一页面出现在任意 URL 层级
+                  （如 /domains、/logs），相对路径会随层级解析到错误位置而 404；
+               3) 不使用盘符或本地文件绝对路径（如 E:\...\background.png）：
+                  Windows 与 Linux 路径格式不同，换平台即失效，也无法被静态路由解析。
+               分层背景：深色遮罩（渐变）叠加在图片之上，保证文字对比度不低于原纯色背景；
+               cover + fixed 保证任意分辨率下铺满、且背景不随内容滚动，布局与响应式不受影响。 */
+            background-color: #0f172a;
+            background-image:
+                linear-gradient(135deg, rgba(15, 23, 42, 0.80) 0%, rgba(15, 23, 42, 0.90) 100%),
+                url("/web/background.png");
+            background-repeat: no-repeat;
+            background-position: center center;
+            background-size: cover;
+            background-attachment: fixed;
             color: #e2e8f0;
             min-height: 100vh;
         }
@@ -31,7 +48,25 @@
             justify-content: center;
             align-items: center;
             min-height: 100vh;
-            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            /* 登录页同用 background.png：保留原渐变色作为遮罩层（#0f172a → #1e293b），
+               再叠加背景图，既呈现品牌氛围，又确保登录卡片（不透明 #1e293b）文字对比度不变。 */
+            background-color: #0f172a;
+            background-image:
+                linear-gradient(135deg, rgba(15, 23, 42, 0.80) 0%, rgba(30, 41, 59, 0.90) 100%),
+                url("/web/background.png");
+            background-repeat: no-repeat;
+            background-position: center center;
+            background-size: cover;
+            background-attachment: fixed;
+        }
+
+        /* 小屏适配：移动端关闭 background-attachment: fixed，
+           避免 iOS/小屏上背景随视口缩放产生的重绘开销与抖动（不改变布局与配色）。 */
+        @media (max-width: 768px) {
+            body,
+            .login-container {
+                background-attachment: scroll;
+            }
         }
         
         .login-card {
@@ -249,7 +284,74 @@
         .table tr:hover {
             background: #334155;
         }
-        
+
+        /* ============ 分页组件（全列表页统一） ============ */
+        .pagination-bar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-top: 16px;
+            padding: 12px 0 4px;
+            font-size: 13px;
+            color: #94a3b8;
+        }
+        .pagination-bar .page-info {
+            color: #94a3b8;
+        }
+        .pagination-bar .page-info b {
+            color: #e2e8f0;
+            font-weight: 600;
+            margin: 0 2px;
+        }
+        .pagination-bar .page-ctrls {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .pagination-bar .page-btn {
+            min-width: 34px;
+            height: 32px;
+            padding: 0 8px;
+            border: 1px solid #334155;
+            border-radius: 6px;
+            background: #1e293b;
+            color: #cbd5e1;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .pagination-bar .page-btn:hover:not(:disabled) {
+            background: #334155;
+            color: #fff;
+        }
+        .pagination-bar .page-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+        .pagination-bar .page-btn.active {
+            background: #3b82f6;
+            border-color: #3b82f6;
+            color: #fff;
+            font-weight: 600;
+        }
+        .pagination-bar .page-size-select {
+            height: 32px;
+            padding: 0 6px;
+            border: 1px solid #334155;
+            border-radius: 6px;
+            background: #1e293b;
+            color: #cbd5e1;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        @media (max-width: 640px) {
+            .pagination-bar {
+                justify-content: center;
+            }
+        }
+
         /* Buttons */
         .btn {
             padding: 8px 16px;
@@ -490,6 +592,15 @@
             display: block;
         }
 
+        /* Agent section (智能体巡检，需操作员权限 role>=1) */
+        .agent-section {
+            display: none;
+        }
+
+        .agent-section.visible {
+            display: block;
+        }
+
         .log-toolbar {
             display: flex;
             flex-wrap: wrap;
@@ -560,6 +671,35 @@
             font-size: 12px;
             color: #94a3b8;
         }
+    </style>
+    <!-- ReactFlow 拓扑图可视化库 (CDN) -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reactflow@11.10.4/dist/style.css" />
+    <script crossorigin src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js"></script>
+    <script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/reactflow@11.10.4/dist/umd/index.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.24.0/babel.min.js"></script>
+    <style>
+        /* ReactFlow 自定义节点样式 */
+        .asset-node {
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 500;
+            border: 2px solid;
+            background: white;
+            min-width: 120px;
+            text-align: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+        .asset-node .node-sub { font-size: 11px; font-weight: 400; margin-top: 4px; opacity: 0.75; }
+        .node-domain { border-color: #3b82f6; background: #eff6ff; color: #1e40af; }
+        .node-subdomain { border-color: #8b5cf6; background: #f5f3ff; color: #6d28d9; }
+        .node-ip { border-color: #10b981; background: #ecfdf5; color: #065f46; }
+        .node-ip.down { border-color: #ef4444; background: #fef2f2; color: #991b1b; }
+        .node-port { border-color: #f59e0b; background: #fffbeb; color: #92400e; }
+        .node-service { border-color: #ec4899; background: #fdf2f8; color: #9d174d; }
+        .react-flow__edge-path { stroke: #94a3b8; stroke-width: 1.5px; }
+        .react-flow__controls { box-shadow: 0 2px 8px rgba(0,0,0,0.1); border-radius: 6px; }
     </style>
 </head>
 <body>
@@ -708,33 +848,115 @@
                     </tbody>
                 </table>
             </div>
-        </section>
-        
-        <!-- Domains Section -->
-        <section id="domains" class="section">
-            <div class="card">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-                    <div class="card-title" style="margin:0;">域名列表</div>
-                    <button class="btn btn-primary" onclick="showAddDomainModal()">+ 添加域名</button>
-                </div>
-                <table class="table">
+
+            <div class="card" id="recentAgentTasksCard">
+                <div class="card-title">最近智能体任务</div>
+                <table class="table" id="recentAgentTasks">
                     <thead>
                         <tr>
-                            <th>域名</th>
-                            <th>描述</th>
-                            <th>扫描深度</th>
-                            <th>最大页面</th>
+                            <th>目标</th>
                             <th>状态</th>
-                            <th>操作</th>
+                            <th>轮次</th>
+                            <th>创建时间</th>
                         </tr>
                     </thead>
-                    <tbody id="domainsBody">
-                        <tr><td colspan="6" style="text-align:center;color:#64748b;">暂无数据</td></tr>
+                    <tbody id="recentAgentTasksBody">
+                        <tr><td colspan="4" style="text-align:center;color:#64748b;">暂无数据</td></tr>
                     </tbody>
                 </table>
             </div>
         </section>
         
+        <!-- Domains Section: 域名管理 + 网络资产拓扑图（合并） -->
+        <section id="domains" class="section">
+            <!-- Tab 切换 -->
+            <div style="display:flex;gap:0;margin-bottom:20px;border-bottom:2px solid #e2e8f0;">
+                <button class="btn" id="domainTabBtn" onclick="switchDomainTab('list')" style="border-radius:0;border:none;border-bottom:3px solid #3b82f6;margin-bottom:-2px;font-weight:600;color:#3b82f6;">域名列表</button>
+                <button class="btn" id="assetTabBtn" onclick="switchDomainTab('assets')" style="border-radius:0;border:none;border-bottom:3px solid transparent;margin-bottom:-2px;color:#64748b;">网络资产拓扑</button>
+            </div>
+
+            <!-- Tab 1: 域名列表 -->
+            <div id="domainListTab">
+                <div class="card">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+                        <div class="card-title" style="margin:0;">域名列表</div>
+                        <button class="btn btn-primary" onclick="showAddDomainModal()">+ 添加域名</button>
+                    </div>
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>域名</th>
+                                <th>描述</th>
+                                <th>扫描深度</th>
+                                <th>最大页面</th>
+                                <th>状态</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="domainsBody">
+                            <tr><td colspan="6" style="text-align:center;color:#64748b;">暂无数据</td></tr>
+                        </tbody>
+                    </table>
+                    <div id="domainsPagination" class="pagination-bar"></div>
+                </div>
+            </div>
+
+            <!-- Tab 2: 网络资产拓扑图 -->
+            <div id="assetTopologyTab" style="display:none;">
+                <div class="card">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:12px;">
+                        <div class="card-title" style="margin:0;">网络资产拓扑图</div>
+                        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                            <select id="assetDomainSelect" class="form-control" style="width:220px;">
+                                <option value="">选择域名...</option>
+                            </select>
+                            <input id="assetSearchInput" class="form-control" style="width:180px;" placeholder="搜索节点..." />
+                            <button class="btn btn-primary" onclick="triggerAssetScan()">扫描资产</button>
+                            <button class="btn" onclick="refreshAssetGraph()">刷新图谱</button>
+                        </div>
+                    </div>
+                    <div id="assetGraphContainer" style="width:100%;height:560px;border-radius:8px;overflow:hidden;border:1px solid #e2e8f0;background:#f8fafc;">
+                        <div id="assetGraphPlaceholder" style="display:flex;align-items:center;justify-content:center;height:100%;color:#94a3b8;font-size:14px;">
+                            请先选择域名，然后点击"扫描资产"开始发现网络暴露面
+                        </div>
+                    </div>
+                    <!-- 资产详情面板 -->
+                    <div id="assetDetailPanel" style="display:none;margin-top:16px;padding:16px;background:#f1f5f9;border-radius:8px;border-left:4px solid #3b82f6;">
+                        <div style="display:flex;justify-content:space-between;align-items:start;">
+                            <div>
+                                <div id="assetDetailTitle" style="font-weight:600;font-size:15px;color:#1e293b;"></div>
+                                <div id="assetDetailType" style="font-size:12px;color:#64748b;margin-top:2px;"></div>
+                            </div>
+                            <button onclick="closeAssetDetail()" style="background:none;border:none;cursor:pointer;color:#94a3b8;font-size:18px;">&times;</button>
+                        </div>
+                        <div id="assetDetailBody" style="margin-top:12px;font-size:13px;color:#475569;line-height:1.6;"></div>
+                    </div>
+                    <!-- 资产列表表格 -->
+                    <div style="margin-top:20px;">
+                        <div class="card-title" style="font-size:14px;margin-bottom:12px;">资产明细列表</div>
+                        <table class="table" id="assetTable">
+                            <thead>
+                                <tr>
+                                    <th>IP 地址</th>
+                                    <th>IP 版本</th>
+                                    <th>存活</th>
+                                    <th>端口</th>
+                                    <th>服务</th>
+                                    <th>状态</th>
+                                    <th>应用名称</th>
+                                    <th>版本</th>
+                                    <th>标题</th>
+                                </tr>
+                            </thead>
+                            <tbody id="assetTableBody">
+                                <tr><td colspan="9" style="text-align:center;color:#64748b;">暂无数据，请先扫描资产</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+
         <!-- Scans Section -->
         <section id="scans" class="section">
             <div class="card">
@@ -754,6 +976,7 @@
                         <tr><td colspan="6" style="text-align:center;color:#64748b;">暂无数据</td></tr>
                     </tbody>
                 </table>
+                <div id="scansPagination" class="pagination-bar"></div>
             </div>
         </section>
         
@@ -780,9 +1003,10 @@
                         <tr><td colspan="7" style="text-align:center;color:#64748b;">暂无数据</td></tr>
                     </tbody>
                 </table>
+                <div id="ticketsPagination" class="pagination-bar"></div>
             </div>
         </section>
-        
+
         <!-- AI Models Section -->
         <section id="aimodels" class="section">
             <div class="card">
@@ -827,6 +1051,46 @@
 
         <!-- AI 巡检 Section -->
         <section id="inspections" class="section">
+            <!-- 智能体巡检（合并入 AI 巡检面板，需操作员权限） -->
+            <div class="card agent-section">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                    <div class="card-title" style="margin:0;">智能体自动化巡检</div>
+                    <div style="display:flex;gap:10px;">
+                        <button class="btn" style="background:#334155;" onclick="loadAgentTools()">查看工具清单</button>
+                        <button class="btn" style="background:#334155;" onclick="loadAgentTasks()">刷新任务</button>
+                    </div>
+                </div>
+                <div style="margin-bottom:12px;font-size:13px;color:#94a3b8;">
+                    用自然语言描述巡检目标，智能体将自主调用平台工具对资产执行扫描、分析与建单。需操作员及以上权限。
+                </div>
+                <textarea id="agentGoal" class="form-input" rows="3"
+                    placeholder="例如：发现 SQL 注入、XSS 或敏感文件泄露就建工单并总结风险。"></textarea>
+                <div style="margin-top:12px;display:flex;gap:12px;align-items:center;">
+                    <button class="btn btn-primary" id="agentRunBtn" onclick="runAgentTask()">发起巡检</button>
+                    <span id="agentStatus" style="font-size:13px;color:#94a3b8;"></span>
+                </div>
+                <div id="agentSteps" style="margin-top:16px;font-family:monospace;font-size:13px;line-height:1.9;background:#0f172a;padding:12px;border-radius:8px;min-height:40px;"></div>
+                <div id="agentResult" style="margin-top:12px;white-space:pre-wrap;font-size:14px;"></div>
+            </div>
+
+            <div class="card agent-section" style="margin-top:20px;">
+                <div class="card-title">智能体任务历史</div>
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>任务ID</th>
+                            <th>状态</th>
+                            <th>目标</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="agentTasksBody">
+                        <tr><td colspan="4" style="text-align:center;color:#64748b;">加载中...</td></tr>
+                    </tbody>
+                </table>
+                <div id="agentTasksPagination" class="pagination-bar"></div>
+            </div>
+
             <div class="card">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
                     <div class="card-title" style="margin:0;">巡检规则</div>
@@ -851,6 +1115,7 @@
                         <tr><td colspan="6" style="text-align:center;color:#64748b;">加载中...</td></tr>
                     </tbody>
                 </table>
+                <div id="inspectionRulesPagination" class="pagination-bar"></div>
             </div>
 
             <div class="card" style="margin-top:20px;">
@@ -873,6 +1138,7 @@
                         <tr><td colspan="8" style="text-align:center;color:#64748b;">加载中...</td></tr>
                     </tbody>
                 </table>
+                <div id="inspectionRecordsPagination" class="pagination-bar"></div>
             </div>
         </section>
 
@@ -885,21 +1151,39 @@
                 </div>
 
                 <div class="log-toolbar">
-                    <select id="logLevelFilter" class="form-input">
-                        <option value="">全部级别</option>
-                        <option value="ERROR">ERROR</option>
-                        <option value="WARN">WARN</option>
-                        <option value="INFO">INFO</option>
-                        <option value="DEBUG">DEBUG</option>
-                        <option value="FRONTEND">前端</option>
-                    </select>
                     <input id="logKeyword" class="form-input" type="text" placeholder="关键字过滤…" style="min-width:200px;" />
                     <label style="font-size:13px;color:#94a3b8;display:flex;align-items:center;gap:6px;">
                         <input id="logAutoScroll" type="checkbox" checked /> 自动滚动到底部
                     </label>
+                    <button id="logFilterSettingsBtn" class="btn" style="background:#334155;" onclick="toggleLogFilterSettings()">过滤设置</button>
                     <button id="logPauseBtn" class="btn" style="background:#334155;" onclick="toggleLogPause()">暂停刷新</button>
                     <button id="logClearBtn" class="btn" style="background:#334155;" onclick="clearLogView()">清除视图</button>
                     <span id="logStatus" style="margin-left:auto;font-size:12px;color:#64748b;"></span>
+                </div>
+
+                <!-- 过滤设置面板（可折叠） -->
+                <div id="logFilterSettingsPanel" style="display:none;margin-bottom:12px;padding:14px;background:#0f172a;border-radius:8px;border:1px solid #334155;">
+                    <div style="font-size:13px;font-weight:600;color:#cbd5e1;margin-bottom:10px;">日志过滤规则</div>
+
+                    <label style="font-size:13px;color:#94a3b8;display:flex;align-items:center;gap:6px;margin-bottom:10px;cursor:pointer;">
+                        <input id="logHideHighFreq" type="checkbox" checked /> 默认隐藏高频低价值日志（API 调用、心跳/ping、静态资源请求等）
+                    </label>
+
+                    <div style="font-size:12px;color:#64748b;margin-bottom:6px;">日志类型筛选（勾选后仅显示选中类型）：</div>
+                    <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:10px;">
+                        <label style="font-size:13px;color:#94a3b8;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" class="log-type-cb" data-level="ERROR" checked /> ERROR</label>
+                        <label style="font-size:13px;color:#94a3b8;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" class="log-type-cb" data-level="WARN" checked /> WARN</label>
+                        <label style="font-size:13px;color:#94a3b8;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" class="log-type-cb" data-level="INFO" checked /> INFO</label>
+                        <label style="font-size:13px;color:#94a3b8;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" class="log-type-cb" data-level="DEBUG" checked /> DEBUG</label>
+                        <label style="font-size:13px;color:#94a3b8;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" class="log-type-cb" data-level="FRONTEND" checked /> 前端日志</label>
+                    </div>
+
+                    <div style="font-size:12px;color:#64748b;margin-bottom:6px;">自定义排除规则（每行一个关键字，匹配到即隐藏，不区分大小写）：</div>
+                    <textarea id="logCustomExcludes" rows="3" placeholder="例如：&#10;GET /api/logs&#10;health check&#10;favicon" style="width:100%;background:#1e293b;border:1px solid #334155;border-radius:6px;color:#cbd5e1;padding:8px;font-size:13px;font-family:monospace;resize:vertical;"></textarea>
+                    <div style="display:flex;gap:8px;margin-top:10px;">
+                        <button class="btn btn-primary" style="padding:6px 14px;font-size:13px;" onclick="applyLogFilterSettings()">应用规则</button>
+                        <button class="btn" style="padding:6px 14px;font-size:13px;background:#334155;" onclick="resetLogFilterSettings()">恢复默认</button>
+                    </div>
                 </div>
 
                 <div id="logTerminal" class="log-terminal"></div>
@@ -932,7 +1216,7 @@
         
         <!-- Footer -->
         <footer class="footer">
-            交巡智星——面向网站安全风险评估与敏感信息防泄露的智能巡检智能体 | Powered by DeepSeek AI
+            交巡智星——面向网站安全风险评估与敏感信息防泄露的智能巡检智能体 | 版权所有：交巡智星项目组©2026
         </footer>
     </div>
     
@@ -1048,7 +1332,34 @@
             </div>
         </div>
     </div>
-    
+
+    <!-- 修改密码 模态框 -->
+    <div class="modal-overlay" id="changePasswordModal">
+        <div class="modal" style="width:420px;">
+            <div class="modal-header">
+                <div class="modal-title">修改密码：<span id="changePwdTargetName"></span></div>
+                <button class="modal-close" onclick="closeModal('changePasswordModal')">&times;</button>
+            </div>
+            <div class="form-group">
+                <label class="form-label" id="changePwdCurrentLabel">当前密码（修改自身需填写）</label>
+                <input class="form-input" type="password" id="changePwdCurrent" placeholder="修改自身账户时必填" autocomplete="off">
+            </div>
+            <div class="form-group">
+                <label class="form-label">新密码</label>
+                <input class="form-input" type="password" id="changePwdNew" placeholder="6~128 位" autocomplete="off">
+            </div>
+            <div class="form-group">
+                <label class="form-label">确认新密码</label>
+                <input class="form-input" type="password" id="changePwdConfirm" placeholder="再次输入新密码" autocomplete="off">
+            </div>
+            <div id="changePwdError" style="color:#f87171;font-size:12px;margin-top:4px;min-height:16px;"></div>
+            <div style="display:flex;justify-content:flex-end;gap:12px;margin-top:16px;">
+                <button type="button" class="btn" style="background:#475569;" onclick="closeModal('changePasswordModal')">取消</button>
+                <button type="button" class="btn btn-primary" onclick="submitChangePassword()">确定</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Scan Results Modal -->
     <div class="modal-overlay" id="scanResultsModal">
         <div class="modal" style="width:900px;max-height:80vh;overflow-y:auto;">
@@ -1098,9 +1409,10 @@
                     <label>规则名称</label>
                     <input class="form-input" name="name" required placeholder="例如：每日安全巡检">
                 </div>
-                <div>
-                    <label>关联域名</label>
-                    <select class="form-input" name="domain_id" required id="inspRuleDomainSelect"></select>
+                <div style="grid-column:1/3;">
+                    <label>关联资产（可多选，一个规则绑定多个域名）</label>
+                    <div id="inspRuleDomainCheckboxes" style="margin-top:6px;max-height:140px;overflow-y:auto;border:1px solid #334155;border-radius:6px;padding:8px;background:#0f172a;display:flex;flex-wrap:wrap;gap:10px;"></div>
+                    <div id="inspRuleDomainHint" style="margin-top:4px;font-size:12px;color:#64748b;"></div>
                 </div>
                 <div>
                     <label>状态</label>
@@ -1119,23 +1431,6 @@
                         <button type="button" class="btn" style="background:#334155;font-size:12px;" onclick="previewInspCron()">验证并预览</button>
                     </div>
                     <div id="inspCronPreview" style="margin-top:6px;font-size:12px;color:#94a3b8;"></div>
-                </div>
-                <div>
-                    <label>模型供应商</label>
-                    <select class="form-input" name="provider">
-                        <option value="">按当前策略（默认模型）</option>
-                        <option value="deepseek">DeepSeek</option>
-                        <option value="kimi">Kimi</option>
-                        <option value="glm">GLM</option>
-                    </select>
-                </div>
-                <div>
-                    <label>模型名（可选，覆盖默认）</label>
-                    <input class="form-input" name="model" placeholder="如 glm-4.6">
-                </div>
-                <div style="grid-column:1/3;">
-                    <label>提示词模板（可选）</label>
-                    <textarea class="form-input" name="prompt_template" rows="3" placeholder="留空则使用系统默认巡检提示词；可引用扫描摘要上下文"></textarea>
                 </div>
                 <div>
                     <label>巡检前先扫描</label>
@@ -1171,6 +1466,17 @@
             <button class="modal-close" onclick="closeModal('inspectionRecordModal')">&times;</button>
             <h3 style="margin-top:0;">巡检记录详情</h3>
             <div id="inspectionRecordDetail"></div>
+        </div>
+    </div>
+
+    <!-- 智能体任务详情模态窗 -->
+    <div class="modal-overlay" id="agentTaskDetailModal">
+        <div class="modal modal-scroll" style="width:720px;">
+            <div class="modal-header">
+                <div class="modal-title">智能体任务详情</div>
+                <button class="modal-close" onclick="closeModal('agentTaskDetailModal')">&times;</button>
+            </div>
+            <div class="modal-body" id="agentTaskDetailContent"></div>
         </div>
     </div>
 
@@ -1304,6 +1610,10 @@
 
             let response;
             const target = API_BASE + path;
+            // 调试日志：记录请求方法、URL、是否带鉴权与请求体摘要，便于定位接口异常
+            console.log('[API] request', method, target,
+                '| auth=' + (authToken && !skipAuth ? 'yes' : 'no'),
+                '| bodyLen=' + (body == null ? 0 : (typeof body === 'string' ? body.length : JSON.stringify(body).length)));
             try {
                 response = await fetch(target, {
                     method,
@@ -1323,6 +1633,10 @@
                 throw new APIError('无法连接到 ' + API_HOST, 'network');
             }
             clearTimeout(timer);
+
+            // 调试日志：记录响应状态（成功/失败），配合 fetchAPI 的错误日志定位 404 等故障
+            console.log('[API] response', method, target, '| status=' + response.status,
+                '| ok=' + response.ok, '| contentType=' + (response.headers.get('content-type') || ''));
 
             // 401：登录失效，统一清理本地状态
             if (response.status === 401) {
@@ -1493,9 +1807,14 @@
                     if (item.dataset.section === 'aimodels') {
                         loadAIProviders();
                     }
-                    // 切到 AI 巡检页时加载规则与记录
+                    // 切到域名管理页时加载资产域名下拉列表
+                    if (item.dataset.section === 'domains') {
+                        loadAssetDomainSelect();
+                    }
+                    // 切到 AI 巡检页时加载规则、记录与智能体任务
                     if (item.dataset.section === 'inspections') {
                         loadInspections();
+                        loadAgentTasks();
                     }
                     // 切到系统日志页时启动日志拉取；切走时停止，节省请求
                     if (item.dataset.section === 'logs') {
@@ -1512,9 +1831,15 @@
             document.getElementById('addInspectionRuleForm').addEventListener('submit', handleAddInspectionRule);
 
             // 日志页过滤控件
-            document.getElementById('logLevelFilter').addEventListener('input', renderLogs);
             document.getElementById('logKeyword').addEventListener('input', renderLogs);
             document.getElementById('logAutoScroll').addEventListener('change', renderLogs);
+            // 类型筛选复选框：切换即生效
+            document.querySelectorAll('.log-type-cb').forEach(cb => {
+                cb.addEventListener('change', renderLogs);
+            });
+            // 隐藏高频日志复选框：切换即生效
+            const hideHighFreqCb = document.getElementById('logHideHighFreq');
+            if (hideHighFreqCb) hideHighFreqCb.addEventListener('change', renderLogs);
         });
         
         // ============================================================
@@ -1842,6 +2167,10 @@
             if (userRoleLevel >= 2) {
                 document.querySelectorAll('.log-section').forEach(el => el.classList.add('visible'));
             }
+            // Show agent section for role >= 1 (操作员及以上)，智能体会对平台执行扫描/建单
+            if (userRoleLevel >= 1) {
+                document.querySelectorAll('.agent-section').forEach(el => el.classList.add('visible'));
+            }
             
             init();
         }
@@ -1859,11 +2188,13 @@
 
         async function fetchAPI(url, options = {}) {
             lastAPIError = null;
+            const method = (options && options.method) || 'GET';
+            console.log('[API] fetchAPI', method, url, '| params=', JSON.stringify(options && options.body ? options.body : null));
             try {
                 return await apiRequest(url, options);
             } catch (err) {
                 lastAPIError = err;
-                console.error('[API]', err.kind || 'unknown', err.message);
+                console.error('[API]', err.kind || 'unknown', err.status || '', err.message);
 
                 // 仅在确认是「登录失效」时才清理会话；网络故障不登出
                 if (err instanceof APIError && err.status === 401) {
@@ -1874,6 +2205,9 @@
                 return null;
             }
         }
+
+        // 智能体相关调试日志统一前缀，便于在控制台按 [Agent] 过滤
+        function logAgent(msg) { console.log('[Agent] ' + msg); }
         
         // Modal functions
         function showAddDomainModal() {
@@ -1959,69 +2293,105 @@
             const tbody = document.getElementById('recentScansBody');
             if (recent.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#64748b;">暂无数据</td></tr>';
+            } else {
+                tbody.innerHTML = recent.map(s => `
+                    <tr>
+                        <td><strong>${s.domainName}</strong></td>
+                        <td><span class="badge ${getStatusBadge(s.status)}">${s.status}</span></td>
+                        <td>${s.total_pages || 0}</td>
+                        <td>${s.total_vulnerabilities || 0}</td>
+                        <td>${s.sensitive_found || 0}</td>
+                        <td>${formatDate(s.created_at)}</td>
+                        <td>
+                            ${s.status === 'completed' ? `<button class="btn btn-primary" style="padding:4px 8px;font-size:12px;" onclick="showScanResults('${s.id}')">查看结果</button>` : ''}
+                        </td>
+                    </tr>
+                `).join('');
+            }
+
+            // 最近智能体任务：操作员(role_level>=1)及以上可见，点击行/查看打开任务详情
+            const agentCard = document.getElementById('recentAgentTasksCard');
+            if (userRoleLevel < 1) {
+                agentCard.style.display = 'none';
                 return;
             }
-            tbody.innerHTML = recent.map(s => `
-                <tr>
-                    <td><strong>${s.domainName}</strong></td>
-                    <td><span class="badge ${getStatusBadge(s.status)}">${s.status}</span></td>
-                    <td>${s.total_pages || 0}</td>
-                    <td>${s.total_vulnerabilities || 0}</td>
-                    <td>${s.sensitive_found || 0}</td>
-                    <td>${formatDate(s.created_at)}</td>
-                    <td>
-                        ${s.status === 'completed' ? `<button class="btn btn-primary" style="padding:4px 8px;font-size:12px;" onclick="showScanResults('${s.id}')">查看结果</button>` : ''}
-                    </td>
+            agentCard.style.display = '';
+            const agentTbody = document.getElementById('recentAgentTasksBody');
+            const tasks = await fetchAPI('/agent/tasks?limit=5');
+            if (!Array.isArray(tasks) || tasks.length === 0) {
+                agentTbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#64748b;">暂无数据</td></tr>';
+                return;
+            }
+            agentTbody.innerHTML = tasks.map(t => `
+                <tr style="cursor:pointer;" onclick="showAgentTaskDetail('${escapeHtml(t.id)}')" title="点击查看任务详情">
+                    <td><strong>${escapeHtml(t.goal || t.id)}</strong></td>
+                    <td><span class="badge ${getStatusBadge(t.status)}">${t.status}</span></td>
+                    <td>${t.turns || 0}</td>
+                    <td>${formatDate(t.created_at)}</td>
                 </tr>
             `).join('');
         }
         
         // Load domains
+        let allDomainsCache = [];
+        const domainsPaginationState = createPaginationState(10);
         async function loadDomains() {
             const domains = await fetchAPI('/domains') || [];
+            allDomainsCache = domains;
+            renderDomains();
+        }
+        function renderDomains() {
             const tbody = document.getElementById('domainsBody');
-            
-            if (domains.length === 0) {
+            const paged = sliceForPaging(allDomainsCache, domainsPaginationState);
+            if (paged.total === 0) {
                 tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#64748b;">暂无数据</td></tr>';
-                return;
+            } else {
+                tbody.innerHTML = paged.slice.map(d => `
+                    <tr>
+                        <td><strong>${d.name}</strong></td>
+                        <td>${d.description || '-'}</td>
+                        <td>${d.max_depth}</td>
+                        <td>${d.max_pages}</td>
+                        <td><span class="badge ${d.status === 'active' ? 'badge-success' : 'badge-warning'}">${d.status}</span></td>
+                        <td>
+                            ${userRoleLevel >= 1 ? `<button class="btn" style="padding:4px 8px;font-size:12px;background:#334155;" onclick="showEditDomainModal('${d.id}')">编辑</button>` : ''}
+                            ${userRoleLevel >= 1 ? `<button class="btn btn-primary" style="padding:4px 8px;font-size:12px;" onclick="startScan('${d.id}')">扫描</button>` : ''}
+                            ${userRoleLevel >= 3 ? `<button class="btn btn-danger" style="padding:4px 8px;font-size:12px;" onclick="deleteDomain('${d.id}')">删除</button>` : ''}
+                        </td>
+                    </tr>
+                `).join('');
             }
-            
-            tbody.innerHTML = domains.map(d => `
-                <tr>
-                    <td><strong>${d.name}</strong></td>
-                    <td>${d.description || '-'}</td>
-                    <td>${d.max_depth}</td>
-                    <td>${d.max_pages}</td>
-                    <td><span class="badge ${d.status === 'active' ? 'badge-success' : 'badge-warning'}">${d.status}</span></td>
-                    <td>
-                        ${userRoleLevel >= 1 ? `<button class="btn" style="padding:4px 8px;font-size:12px;background:#334155;" onclick="showEditDomainModal('${d.id}')">编辑</button>` : ''}
-                        ${userRoleLevel >= 1 ? `<button class="btn btn-primary" style="padding:4px 8px;font-size:12px;" onclick="startScan('${d.id}')">扫描</button>` : ''}
-                        ${userRoleLevel >= 3 ? `<button class="btn btn-danger" style="padding:4px 8px;font-size:12px;" onclick="deleteDomain('${d.id}')">删除</button>` : ''}
-                    </td>
-                </tr>
-            `).join('');
+            renderPaginationBar('domainsPagination', domainsPaginationState, paged, renderDomains);
         }
         
         // Load scans
+        let allScansCache = [];
+        const scansPaginationState = createPaginationState(10);
         async function loadScans() {
             const domains = await fetchAPI('/domains') || [];
             const allScans = [];
-            
+
             for (const domain of domains) {
                 const scans = await fetchAPI(`/domains/${domain.id}/scans`) || [];
                 scans.forEach(s => s.domainName = domain.name);
                 allScans.push(...scans);
             }
-            
+
             allScans.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-            
+            allScansCache = allScans;
+            renderScans();
+        }
+
+        function renderScans() {
             const tbody = document.getElementById('scansBody');
-            if (allScans.length === 0) {
+            if (!tbody) return;
+            if (allScansCache.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#64748b;">暂无数据</td></tr>';
+                renderPaginationBar('scansPagination', scansPaginationState, { total: 0, totalPages: 1 }, renderScans);
                 return;
             }
-            
-            tbody.innerHTML = allScans.map(s => `
+            const paged = sliceForPaging(allScansCache, scansPaginationState);
+            tbody.innerHTML = paged.slice.map(s => `
                 <tr>
                     <td><code style="background:#0f172a;padding:2px 6px;border-radius:4px;">${s.id.substring(0, 8)}...</code></td>
                     <td>${s.domainName}</td>
@@ -2034,19 +2404,27 @@
                     </td>
                 </tr>
             `).join('');
+            renderPaginationBar('scansPagination', scansPaginationState, paged, renderScans);
         }
         
         // Load tickets
+        let allTicketsCache = [];
+        const ticketsPaginationState = createPaginationState(10);
         async function loadTickets() {
-            const tickets = await fetchAPI('/tickets') || [];
+            allTicketsCache = await fetchAPI('/tickets') || [];
+            renderTickets();
+        }
+
+        function renderTickets() {
             const tbody = document.getElementById('ticketsBody');
-            
-            if (tickets.length === 0) {
+            if (!tbody) return;
+            if (allTicketsCache.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#64748b;">暂无数据</td></tr>';
+                renderPaginationBar('ticketsPagination', ticketsPaginationState, { total: 0, totalPages: 1 }, renderTickets);
                 return;
             }
-            
-            tbody.innerHTML = tickets.map(t => `
+            const paged = sliceForPaging(allTicketsCache, ticketsPaginationState);
+            tbody.innerHTML = paged.slice.map(t => `
                 <tr>
                     <td><code style="background:#0f172a;padding:2px 6px;border-radius:4px;">${t.id.substring(0, 8)}...</code></td>
                     <td>${t.title || (t.vuln_id ? ('漏洞工单 ' + t.vuln_id.substring(0, 8)) : '工单')}</td>
@@ -2059,6 +2437,7 @@
                     </td>
                 </tr>
             `).join('');
+            renderPaginationBar('ticketsPagination', ticketsPaginationState, paged, renderTickets);
         }
         
         // ============ AI 多模型（DeepSeek / Kimi / GLM） ============
@@ -2446,9 +2825,12 @@
                     <td>${getRoleName(u.role_level)}</td>
                     <td>${formatDate(u.created_at)}</td>
                     <td>
-                        ${userRoleLevel >= 3 && u.username !== currentUser.username ? `
-                            <button class="btn btn-primary" style="padding:4px 8px;font-size:12px;" onclick="showChangeRoleModal('${u.id}')">改权限</button>
-                            <button class="btn btn-danger" style="padding:4px 8px;font-size:12px;" onclick="deleteUser('${u.id}')">删除</button>
+                        ${userRoleLevel >= 3 ? `
+                            <button class="btn btn-primary" style="padding:4px 8px;font-size:12px;" onclick="showChangePasswordModal('${u.id}','${escapeHtml(u.username)}')">改密码</button>
+                            ${u.username !== currentUser.username ? `
+                                <button class="btn btn-primary" style="padding:4px 8px;font-size:12px;" onclick="showChangeRoleModal('${u.id}')">改权限</button>
+                                <button class="btn btn-danger" style="padding:4px 8px;font-size:12px;" onclick="deleteUser('${u.id}')">删除</button>
+                            ` : ''}
                         ` : '-'}
                     </td>
                 </tr>
@@ -2488,7 +2870,58 @@
             closeModal('changeRoleModal');
             await changeUserRole(userId, level);
         }
-        
+
+        // 打开「修改密码」弹层（管理员可改自身及他人）
+        let changePwdTargetId = null;
+
+        function showChangePasswordModal(userId, username) {
+            changePwdTargetId = userId;
+            const isSelf = currentUser && currentUser.id === userId;
+            document.getElementById('changePwdTargetName').textContent = username || userId;
+            document.getElementById('changePwdCurrent').value = '';
+            document.getElementById('changePwdNew').value = '';
+            document.getElementById('changePwdConfirm').value = '';
+            document.getElementById('changePwdError').textContent = '';
+            // 改自身需填当前密码；管理员改他人隐藏该字段
+            document.getElementById('changePwdCurrentLabel').textContent = isSelf ? '当前密码（必填）' : '当前密码（管理员改他人可不填）';
+            document.getElementById('changePwdCurrent').style.display = isSelf ? '' : 'none';
+            document.getElementById('changePasswordModal').classList.add('active');
+        }
+
+        async function submitChangePassword() {
+            const userId = changePwdTargetId;
+            if (!userId) return;
+            const isSelf = currentUser && currentUser.id === userId;
+            const currentPwd = document.getElementById('changePwdCurrent').value;
+            const newPwd = document.getElementById('changePwdNew').value;
+            const confirmPwd = document.getElementById('changePwdConfirm').value;
+            const errBox = document.getElementById('changePwdError');
+
+            if (isSelf && currentPwd === '') {
+                errBox.textContent = '修改自身密码需填写当前密码';
+                return;
+            }
+            if (newPwd.length < 6 || newPwd.length > 128) {
+                errBox.textContent = '新密码长度需为 6~128 位';
+                return;
+            }
+            if (newPwd !== confirmPwd) {
+                errBox.textContent = '两次输入的新密码不一致';
+                return;
+            }
+
+            const body = { new_password: newPwd };
+            if (isSelf) body.current_password = currentPwd;
+            const result = await fetchAPI(`/admin/users/${userId}/password`, {
+                method: 'PATCH',
+                body: JSON.stringify(body)
+            });
+            if (!result) return; // fetchAPI 已弹错误
+            errBox.textContent = '';
+            closeModal('changePasswordModal');
+            showToast('密码已更新', 'success');
+        }
+
         // Delete user
         async function deleteUser(userId) {
             if (!confirm('确定要删除该用户吗？')) return;
@@ -2837,6 +3270,7 @@
                 'running': 'badge-info',
                 'analyzing': 'badge-info',
                 'pending': 'badge-warning',
+                'cancelled': 'badge-warning',
                 'failed': 'badge-danger',
                 'new': 'badge-danger',
                 'acknowledged': 'badge-warning',
@@ -2889,7 +3323,85 @@
             if (!dateStr) return '-';
             return new Date(dateStr).toLocaleString('zh-CN');
         }
-        
+
+        // ============ 通用分页组件（全列表页统一，客户端分页） ============
+        const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
+
+        function createPaginationState(pageSize) {
+            return { currentPage: 1, pageSize: pageSize || 10 };
+        }
+
+        // 对全量数据按当前分页状态切片
+        function sliceForPaging(allData, state) {
+            const total = Array.isArray(allData) ? allData.length : 0;
+            const totalPages = Math.max(1, Math.ceil(total / state.pageSize));
+            if (state.currentPage > totalPages) state.currentPage = totalPages;
+            const start = (state.currentPage - 1) * state.pageSize;
+            return {
+                total,
+                totalPages,
+                start,
+                end: Math.min(start + state.pageSize, total),
+                slice: (allData || []).slice(start, start + state.pageSize),
+            };
+        }
+
+        // 渲染分页栏并绑定事件；onChange 为重新渲染列表的回调
+        function renderPaginationBar(containerId, state, paged, onChange) {
+            const el = document.getElementById(containerId);
+            if (!el) return;
+            const { total, totalPages } = paged;
+            const cur = state.currentPage;
+
+            // 页码按钮（最多 7 个，围绕当前页）
+            let pageBtns = '';
+            const maxVisible = 7;
+            let startPage = Math.max(1, cur - 3);
+            let endPage = Math.min(totalPages, startPage + maxVisible - 1);
+            if (endPage - startPage < maxVisible - 1) startPage = Math.max(1, endPage - maxVisible + 1);
+            for (let p = startPage; p <= endPage; p++) {
+                pageBtns += `<button class="page-btn ${p === cur ? 'active' : ''}" data-page="${p}">${p}</button>`;
+            }
+
+            const sizeOptions = PAGE_SIZE_OPTIONS.map(s =>
+                `<option value="${s}" ${s === state.pageSize ? 'selected' : ''}>${s}条/页</option>`
+            ).join('');
+
+            el.innerHTML = `
+                <div class="page-info">共 <b>${total}</b> 条 · 第 <b>${cur}</b>/<b>${totalPages}</b> 页</div>
+                <div class="page-ctrls">
+                    <select class="page-size-select">${sizeOptions}</select>
+                    <button class="page-btn" data-act="first" ${cur <= 1 ? 'disabled' : ''}>首页</button>
+                    <button class="page-btn" data-act="prev" ${cur <= 1 ? 'disabled' : ''}>上一页</button>
+                    ${pageBtns}
+                    <button class="page-btn" data-act="next" ${cur >= totalPages ? 'disabled' : ''}>下一页</button>
+                    <button class="page-btn" data-act="last" ${cur >= totalPages ? 'disabled' : ''}>末页</button>
+                </div>`;
+
+            el.querySelector('.page-size-select').addEventListener('change', (e) => {
+                state.pageSize = parseInt(e.target.value, 10) || 10;
+                state.currentPage = 1;
+                onChange();
+            });
+            el.querySelectorAll('.page-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const act = btn.dataset.act;
+                    let page = cur;
+                    if (act === 'first') page = 1;
+                    else if (act === 'prev') page = cur - 1;
+                    else if (act === 'next') page = cur + 1;
+                    else if (act === 'last') page = totalPages;
+                    else page = parseInt(btn.dataset.page, 10);
+                    if (page < 1) page = 1;
+                    if (page > totalPages) page = totalPages;
+                    if (page !== cur) {
+                        state.currentPage = page;
+                        onChange();
+                    }
+                });
+            });
+        }
+
         // Initialize
         // 串行加载但相互隔离：任一环节抛异常不再中断后续加载，
         // 避免单个接口异常导致后面所有页面（工单/用户等）都空白。
@@ -2917,14 +3429,25 @@
         // ============================================================
         let inspDomainsCache = [];
 
+        let inspRulesCache = [];
+        const inspRulesPaginationState = createPaginationState(10);
+        let inspRecordsCache = [];
+        const inspRecordsPaginationState = createPaginationState(10);
+
         async function loadInspections() {
+            // 先确保域名缓存就绪，使规则列表能正确解析多资产名称
+            if (inspDomainsCache.length === 0) {
+                inspDomainsCache = (await fetchAPI('/domains')) || [];
+            }
             const [rules, records, stats] = await Promise.all([
                 fetchAPI('/inspections/rules'),
                 fetchAPI('/inspections/records'),
                 fetchAPI('/inspections/stats'),
             ]);
-            renderInspectionRules(rules || []);
-            renderInspectionRecords(records || []);
+            inspRulesCache = rules || [];
+            inspRecordsCache = records || [];
+            renderInspectionRules();
+            renderInspectionRecords();
 
             if (stats && stats.by_status) {
                 const s = stats.by_status;
@@ -2934,16 +3457,34 @@
             }
         }
 
-        function renderInspectionRules(rules) {
+        // 把规则绑定的域名 id 列表解析为可读名称（借助 inspDomainsCache）
+        function resolveRuleDomains(r) {
+            const ids = (r.domain_ids && r.domain_ids.length) ? r.domain_ids : (r.domain_id ? [r.domain_id] : []);
+            const names = ids.map(id => {
+                const d = inspDomainsCache.find(x => x.id === id);
+                return d ? d.name : id;
+            });
+            return { ids, names };
+        }
+
+        function renderInspectionRules() {
             const tbody = document.getElementById('inspectionRulesBody');
-            if (!rules.length) {
+            if (!tbody) return;
+            if (!inspRulesCache.length) {
                 tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#64748b;">暂无规则，点击右上角“新增规则”</td></tr>';
+                renderPaginationBar('inspectionRulesPagination', inspRulesPaginationState, { total: 0, totalPages: 1 }, renderInspectionRules);
                 return;
             }
-            tbody.innerHTML = rules.map(r => `
+            const paged = sliceForPaging(inspRulesCache, inspRulesPaginationState);
+            tbody.innerHTML = paged.slice.map(r => {
+                const { ids, names } = resolveRuleDomains(r);
+                const assetCell = ids.length > 1
+                    ? `<span class="badge badge-info" title="${escapeHtml(names.join('、'))}">${ids.length} 个资产</span> ${escapeHtml(names.slice(0, 2).join('、'))}${names.length > 2 ? '…' : ''}`
+                    : escapeHtml(names[0] || '—');
+                return `
                 <tr>
                     <td><strong>${escapeHtml(r.name)}</strong></td>
-                    <td>${escapeHtml(r.domain_name || r.domain_id)}</td>
+                    <td>${assetCell}</td>
                     <td><code>${escapeHtml(r.schedule)}</code></td>
                     <td><span class="badge ${r.enabled ? 'badge-success' : 'badge-warning'}">${r.enabled ? '启用' : '暂停'}</span></td>
                     <td>${r.next_run_at ? formatDate(r.next_run_at) : (r.last_run_at ? '—' : '未调度')}</td>
@@ -2952,21 +3493,25 @@
                         <button class="btn" style="padding:4px 8px;font-size:12px;background:#475569;" onclick="editInspectionRule('${r.id}')">编辑</button>
                         <button class="btn" style="padding:4px 8px;font-size:12px;background:#7f1d1d;" onclick="deleteInspectionRule('${r.id}')">删除</button>
                     </td>
-                </tr>
-            `).join('');
+                </tr>`;
+            }).join('');
+            renderPaginationBar('inspectionRulesPagination', inspRulesPaginationState, paged, renderInspectionRules);
         }
 
-        function renderInspectionRecords(records) {
+        function renderInspectionRecords() {
             const tbody = document.getElementById('inspectionRecordsBody');
-            if (!records.length) {
+            if (!tbody) return;
+            if (!inspRecordsCache.length) {
                 tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#64748b;">暂无记录</td></tr>';
+                renderPaginationBar('inspectionRecordsPagination', inspRecordsPaginationState, { total: 0, totalPages: 1 }, renderInspectionRecords);
                 return;
             }
             const statusText = {
                 running: '扫描中', analyzing: '分析中', success: '成功',
                 partial: '部分成功', failed: '失败', pending: '等待中'
             };
-            tbody.innerHTML = records.map(rec => `
+            const paged = sliceForPaging(inspRecordsCache, inspRecordsPaginationState);
+            tbody.innerHTML = paged.slice.map(rec => `
                 <tr>
                     <td>${formatDate(rec.created_at)}</td>
                     <td>${escapeHtml(rec.rule_name || '—')}</td>
@@ -2978,6 +3523,7 @@
                     <td><button class="btn btn-primary" style="padding:4px 8px;font-size:12px;" onclick="showInspectionRecordDetail('${rec.id}')">查看</button></td>
                 </tr>
             `).join('');
+            renderPaginationBar('inspectionRecordsPagination', inspRecordsPaginationState, paged, renderInspectionRecords);
         }
 
         function riskBadge(level) {
@@ -2989,18 +3535,44 @@
             }
         }
 
+        // 渲染域名复选框组；checkedIds 为已选中的域名 id 集合
+        function renderInspDomainCheckboxes(checkedIds) {
+            const box = document.getElementById('inspRuleDomainCheckboxes');
+            const hint = document.getElementById('inspRuleDomainHint');
+            if (!inspDomainsCache.length) {
+                box.innerHTML = '<span style="color:#64748b;">暂无域名，请先在资产管理中登记域名</span>';
+                hint.textContent = '';
+                return;
+            }
+            const set = new Set(checkedIds || []);
+            box.innerHTML = inspDomainsCache.map(d => `
+                <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer;">
+                    <input type="checkbox" class="insp-domain-cb" value="${d.id}" ${set.has(d.id) ? 'checked' : ''}>
+                    <span>${escapeHtml(d.name)}</span>
+                </label>`).join('');
+            const updateHint = () => {
+                const n = box.querySelectorAll('.insp-domain-cb:checked').length;
+                hint.textContent = n > 0 ? `已选择 ${n} 个资产` : '请至少选择一个资产';
+            };
+            box.querySelectorAll('.insp-domain-cb').forEach(cb => cb.addEventListener('change', updateHint));
+            updateHint();
+        }
+
+        function getCheckedInspDomainIds() {
+            return Array.from(document.querySelectorAll('#inspRuleDomainCheckboxes .insp-domain-cb:checked')).map(cb => cb.value);
+        }
+
         async function showAddInspectionRuleModal() {
             editInspectionRuleId = null;
             document.getElementById('addInspectionRuleTitle').textContent = '新增巡检规则';
             document.getElementById('addInspectionRuleSubmitBtn').textContent = '保存';
             document.getElementById('addInspectionRuleForm').reset();
             document.getElementById('inspCronPreview').innerHTML = '';
-            // 预填域名下拉
+            // 预填域名复选框
             if (inspDomainsCache.length === 0) {
                 inspDomainsCache = (await fetchAPI('/domains')) || [];
             }
-            const sel = document.getElementById('inspRuleDomainSelect');
-            sel.innerHTML = inspDomainsCache.map(d => `<option value="${d.id}">${escapeHtml(d.name)}</option>`).join('');
+            renderInspDomainCheckboxes([]);
             document.getElementById('addInspectionRuleModal').classList.add('active');
         }
 
@@ -3014,14 +3586,10 @@
             const form = document.getElementById('addInspectionRuleForm');
             form.elements.namedItem('name').value = r.name;
             if (inspDomainsCache.length === 0) inspDomainsCache = (await fetchAPI('/domains')) || [];
-            const sel = document.getElementById('inspRuleDomainSelect');
-            sel.innerHTML = inspDomainsCache.map(d => `<option value="${d.id}">${escapeHtml(d.name)}</option>`).join('');
-            sel.value = r.domain_id;
+            const { ids } = resolveRuleDomains(r);
+            renderInspDomainCheckboxes(ids);
             form.elements.namedItem('enabled').checked = r.enabled;
             form.elements.namedItem('schedule').value = r.schedule || '';
-            form.elements.namedItem('provider').value = r.provider || '';
-            form.elements.namedItem('model').value = r.model || '';
-            form.elements.namedItem('prompt_template').value = r.prompt_template || '';
             form.elements.namedItem('run_scan').checked = r.run_scan;
             form.elements.namedItem('alert_on_failure').checked = r.alert_on_failure;
             form.elements.namedItem('retry_count').value = r.retry_count || 2;
@@ -3053,14 +3621,16 @@
             e.preventDefault();
             const form = e.target;
             const fd = form.elements;
+            const domainIds = getCheckedInspDomainIds();
+            if (domainIds.length === 0) {
+                showToast('请至少选择一个关联资产', 'error');
+                return;
+            }
             const body = {
                 name: fd.namedItem('name').value.trim(),
-                domain_id: fd.namedItem('domain_id').value,
+                domain_ids: domainIds,
                 enabled: fd.namedItem('enabled').checked,
                 schedule: fd.namedItem('schedule').value.trim(),
-                provider: fd.namedItem('provider').value,
-                model: fd.namedItem('model').value.trim(),
-                prompt_template: fd.namedItem('prompt_template').value.trim(),
                 run_scan: fd.namedItem('run_scan').checked,
                 alert_on_failure: fd.namedItem('alert_on_failure').checked,
                 retry_count: parseInt(fd.namedItem('retry_count').value, 10) || 0,
@@ -3135,6 +3705,176 @@
                 ${rec.error ? `<p style="color:#f87171;margin-top:10px;">错误：${escapeHtml(rec.error)}</p>` : ''}
             `;
             document.getElementById('inspectionRecordModal').classList.add('active');
+        }
+
+        // —— 智能体自动化巡检（合并入 AI 巡检面板）——
+        // 交互模型：POST /agent/run 异步提交拿 task_id → 轮询 /agent/tasks/:id 至终态。
+        // 复用平台既有 fetchAPI / showToast / escapeHtml，不重复实现请求与提示逻辑。
+        let agentPollTimer = null;
+
+        async function runAgentTask() {
+            const goal = document.getElementById('agentGoal').value.trim();
+            if (!goal) { showToast('请先描述巡检目标'); return; }
+            logAgent('runAgentTask 提交目标 goal=' + goal);
+            const btn = document.getElementById('agentRunBtn');
+            btn.disabled = true; btn.textContent = '提交中…';
+            document.getElementById('agentStatus').textContent = '任务提交中…';
+            try {
+                const data = await fetchAPI('/agent/run', {
+                    method: 'POST',
+                    body: JSON.stringify({ goal })
+                });
+                logAgent('runAgentTask 响应 data=' + JSON.stringify(data));
+                if (!data || !data.task_id) {
+                    showToast('提交失败，请确认已登录且具备操作员权限（role_level>=1）');
+                    document.getElementById('agentStatus').textContent = '';
+                    return;
+                }
+                showToast('任务已提交：' + data.task_id, 'success');
+                document.getElementById('agentStatus').textContent = '运行中（轮询中）';
+                pollAgentTask(data.task_id);
+            } catch (e) {
+                showToast('提交异常：' + (e && e.message || e));
+                document.getElementById('agentStatus').textContent = '';
+            } finally {
+                btn.disabled = false; btn.textContent = '发起巡检';
+            }
+        }
+
+        async function pollAgentTask(id) {
+            if (agentPollTimer) clearInterval(agentPollTimer);
+            logAgent('pollAgentTask 启动 id=' + id);
+            agentPollTimer = setInterval(async () => {
+                const t = await fetchAPI('/agent/tasks/' + id);
+                if (!t) {
+                    // 查询失败（多为 404 task not found）：停止轮询并提示一次，
+                    // 避免「查看」按钮点击后毫无反应、却持续每 3 秒重试刷屏。
+                    clearInterval(agentPollTimer); agentPollTimer = null;
+                    logAgent('pollAgentTask 收到 null（GET /agent/tasks/' + id + ' 失败/404）已停止轮询');
+                    showToast('任务详情获取失败（接口返回 404 或网络异常），请刷新任务列表后重试', 'error');
+                    return;
+                }
+                logAgent('pollAgentTask 收到任务 id=' + id + ' status=' + t.status + ' steps=' + (t.steps ? t.steps.length : 0));
+                renderAgentTask(t);
+                if (['completed', 'failed', 'cancelled'].includes(t.status)) {
+                    clearInterval(agentPollTimer); agentPollTimer = null;
+                    document.getElementById('agentStatus').textContent = '已完成（' + t.status + '）';
+                    if (t.status === 'completed') showToast('巡检完成', 'success');
+                    else if (t.status === 'failed') showToast('巡检失败：' + (t.error || ''));
+                }
+            }, 3000);
+        }
+
+        function renderAgentTask(t) {
+            const box = document.getElementById('agentSteps');
+            if (!box) return;
+            const steps = (t.steps || []).map(s =>
+                `<div>[${s.status === 'done' ? '✓' : s.status === 'failed' ? '✗' : '…'}] <b>${escapeHtml(s.name)}</b>` +
+                `${s.detail ? (' — ' + escapeHtml(s.detail)) : ''}</div>`
+            ).join('');
+            box.innerHTML = steps || '<div style="color:#64748b;">（暂无步骤，等待智能体规划…）</div>';
+            const r = document.getElementById('agentResult');
+            if (r) r.textContent = t.result || (t.error ? ('错误：' + t.error) : '');
+        }
+
+        // 智能体任务详情模态窗：展示目标、状态、轮次、步骤、结果、时间戳
+        async function showAgentTaskDetail(id) {
+            const content = document.getElementById('agentTaskDetailContent');
+            if (!content) return;
+            content.innerHTML = '<div style="color:#64748b;text-align:center;padding:24px;">加载中…</div>';
+            document.getElementById('agentTaskDetailModal').classList.add('active');
+
+            const t = await fetchAPI('/agent/tasks/' + id);
+            if (!t) {
+                content.innerHTML = '<div style="color:#ef4444;">任务详情获取失败（任务可能已被清理或网络异常）</div>';
+                return;
+            }
+
+            const statusBadge = `<span class="badge ${t.status === 'completed' ? 'badge-success' : t.status === 'failed' ? 'badge-danger' : t.status === 'cancelled' ? 'badge-warning' : 'badge-info'}">${escapeHtml(t.status)}</span>`;
+            const steps = (t.steps || []);
+            const stepsHtml = steps.length
+                ? steps.map((s, i) => {
+                    const icon = s.status === 'done' ? '✓' : s.status === 'failed' ? '✗' : s.status === 'running' ? '…' : '·';
+                    const color = s.status === 'done' ? '#4ade80' : s.status === 'failed' ? '#ef4444' : '#94a3b8';
+                    return `<div style="padding:8px 10px;border:1px solid #334155;border-radius:6px;margin-bottom:8px;background:#0f172a;">
+                        <div style="display:flex;gap:8px;align-items:start;">
+                            <span style="color:${color};font-weight:bold;">${icon}</span>
+                            <div style="flex:1;min-width:0;">
+                                <div style="font-weight:600;color:#e2e8f0;">${i + 1}. ${escapeHtml(s.name || '(未命名步骤)')}</div>
+                                ${s.detail ? `<div style="font-size:13px;color:#94a3b8;margin-top:4px;white-space:pre-wrap;word-break:break-word;">${escapeHtml(s.detail)}</div>` : ''}
+                            </div>
+                        </div>
+                    </div>`;
+                }).join('')
+                : '<div style="color:#64748b;font-size:13px;">（暂无步骤记录）</div>';
+
+            const resultText = t.result || (t.error ? ('错误信息：' + t.error) : '（暂无结果，任务可能仍在执行）');
+            const hasError = !!t.error && !t.result;
+
+            content.innerHTML = `
+                <div style="display:flex;flex-wrap:wrap;gap:8px 16px;margin-bottom:16px;padding:12px;background:#0f172a;border-radius:8px;">
+                    <div style="font-size:13px;color:#94a3b8;">任务ID：<code style="color:#cbd5e1;">${escapeHtml(t.id)}</code></div>
+                    <div style="font-size:13px;color:#94a3b8;">状态：${statusBadge}</div>
+                    <div style="font-size:13px;color:#94a3b8;">轮次：<b style="color:#e2e8f0;">${t.turns || 0}</b></div>
+                </div>
+
+                <div style="margin-bottom:16px;">
+                    <div style="font-size:12px;color:#64748b;text-transform:uppercase;margin-bottom:6px;">任务目标</div>
+                    <div style="padding:10px 12px;background:#0f172a;border-radius:6px;color:#e2e8f0;white-space:pre-wrap;word-break:break-word;">${escapeHtml(t.goal || '—')}</div>
+                </div>
+
+                <div style="margin-bottom:16px;">
+                    <div style="font-size:12px;color:#64748b;text-transform:uppercase;margin-bottom:8px;">执行步骤（${steps.length}）</div>
+                    <div>${stepsHtml}</div>
+                </div>
+
+                <div style="margin-bottom:16px;">
+                    <div style="font-size:12px;color:#64748b;text-transform:uppercase;margin-bottom:6px;">执行结果</div>
+                    <div style="padding:10px 12px;background:#0f172a;border-radius:6px;white-space:pre-wrap;word-break:break-word;max-height:240px;overflow-y:auto;font-family:monospace;font-size:13px;color:${hasError ? '#fca5a5' : '#4ade80'};">${escapeHtml(resultText)}</div>
+                </div>
+
+                <div style="display:flex;flex-wrap:wrap;gap:8px 16px;padding-top:12px;border-top:1px solid #334155;font-size:12px;color:#64748b;">
+                    <div>创建时间：${formatDate(t.created_at)}</div>
+                    ${t.started_at ? `<div>开始：${formatDate(t.started_at)}</div>` : ''}
+                    ${t.completed_at ? `<div>完成：${formatDate(t.completed_at)}</div>` : ''}
+                    ${t.updated_at ? `<div>更新：${formatDate(t.updated_at)}</div>` : ''}
+                </div>
+            `;
+        }
+
+        let allAgentTasksCache = [];
+        const agentTasksPaginationState = createPaginationState(10);
+        async function loadAgentTasks() {
+            allAgentTasksCache = await fetchAPI('/agent/tasks?limit=100') || [];
+            logAgent('loadAgentTasks 返回任务数=' + (allAgentTasksCache ? allAgentTasksCache.length : 0));
+            renderAgentTasks();
+        }
+
+        function renderAgentTasks() {
+            const tb = document.getElementById('agentTasksBody');
+            if (!tb) return;
+            if (!allAgentTasksCache.length) {
+                tb.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#64748b;">暂无任务</td></tr>';
+                renderPaginationBar('agentTasksPagination', agentTasksPaginationState, { total: 0, totalPages: 1 }, renderAgentTasks);
+                return;
+            }
+            const paged = sliceForPaging(allAgentTasksCache, agentTasksPaginationState);
+            tb.innerHTML = paged.slice.map(t =>
+                `<tr>
+                    <td><code>${escapeHtml(t.id.slice(0, 8))}</code></td>
+                    <td><span class="badge ${t.status === 'completed' ? 'badge-success' : t.status === 'failed' ? 'badge-danger' : 'badge-info'}">${escapeHtml(t.status)}</span></td>
+                    <td style="max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(t.goal)}">${escapeHtml(t.goal)}</td>
+                    <td><button class="btn btn-primary" style="padding:4px 8px;font-size:12px;" onclick="showAgentTaskDetail('${escapeHtml(t.id)}')">查看</button></td>
+                </tr>`
+            ).join('');
+            renderPaginationBar('agentTasksPagination', agentTasksPaginationState, paged, renderAgentTasks);
+        }
+
+        async function loadAgentTools() {
+            const d = await fetchAPI('/agent/tools');
+            if (!d) return;
+            const names = (d.tools || []).map(t => t.name);
+            showToast('智能体可用工具 ' + names.length + ' 个：' + names.join('、'), 'success');
         }
 
         // ============================================================
@@ -3269,16 +4009,87 @@
             return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
         }
 
+        // 高频低价值日志关键字（默认隐藏）：API 轮询、心跳、静态资源等
+        const LOG_HIGH_FREQ_PATTERNS = [
+            // 前端 API 调用日志（高频低价值）
+            '[API] fetchAPI', '[API] request', '[API] response',
+            // 服务端高频轮询接口
+            '/api/logs', '/api/stats', '/api/dashboard',
+            '/api/agent/tasks', '/api/inspections/records', '/api/inspections/rules',
+            // 静态资源与健康检查
+            '/favicon', '/assets/', '/static/',
+            '/health', 'heartbeat', 'ping',
+        ];
+
+        function getLogFilterConfig() {
+            const hideHighFreq = document.getElementById('logHideHighFreq');
+            const typeCbs = document.querySelectorAll('.log-type-cb');
+            const customText = document.getElementById('logCustomExcludes');
+            const customExcludes = (customText ? customText.value : '')
+                .split('\n').map(s => s.trim().toLowerCase()).filter(Boolean);
+            const visibleLevels = new Set();
+            typeCbs.forEach(cb => { if (cb.checked) visibleLevels.add(cb.dataset.level); });
+            return {
+                hideHighFreq: hideHighFreq ? hideHighFreq.checked : true,
+                visibleLevels,
+                customExcludes,
+            };
+        }
+
+        function toggleLogFilterSettings() {
+            const panel = document.getElementById('logFilterSettingsPanel');
+            if (!panel) return;
+            panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+        }
+
+        function applyLogFilterSettings() {
+            renderLogs();
+            showToast('日志过滤规则已应用', 'success');
+        }
+
+        function resetLogFilterSettings() {
+            const hideCb = document.getElementById('logHideHighFreq');
+            if (hideCb) hideCb.checked = true;
+            document.querySelectorAll('.log-type-cb').forEach(cb => cb.checked = true);
+            const customText = document.getElementById('logCustomExcludes');
+            if (customText) customText.value = '';
+            renderLogs();
+        }
+
         function renderLogs() {
             const term = document.getElementById('logTerminal');
             if (!term) return;
-            const level = document.getElementById('logLevelFilter').value;
             const kw = document.getElementById('logKeyword').value.trim().toLowerCase();
-            let rows = logBuffer;
-            if (level) rows = rows.filter(e => e.level === level || (level === 'FRONTEND' && e.source === 'WEB'));
-            if (kw) rows = rows.filter(e =>
-                (e.msg && e.msg.toLowerCase().includes(kw)) ||
-                (e.source && e.source.toLowerCase().includes(kw)));
+            const cfg = getLogFilterConfig();
+            const patterns = LOG_HIGH_FREQ_PATTERNS.map(s => s.toLowerCase());
+
+            let rows = logBuffer.filter(e => {
+                const msg = (e.msg || '').toLowerCase();
+                const source = (e.source || '').toLowerCase();
+                const lvl = e.level || 'INFO';
+
+                // 1. 类型筛选器：FRONTEND 对应 source=WEB（替代原级别下拉框）
+                const typeKey = source === 'web' ? 'FRONTEND' : lvl;
+                if (!cfg.visibleLevels.has(typeKey)) return false;
+
+                // 2. 关键字过滤
+                if (kw) {
+                    if (!msg.includes(kw) && !source.includes(kw)) return false;
+                }
+
+                // 3. 默认隐藏高频低价值日志
+                if (cfg.hideHighFreq) {
+                    for (const p of patterns) {
+                        if (msg.includes(p)) return false;
+                    }
+                }
+                // 4. 自定义排除规则
+                for (const ex of cfg.customExcludes) {
+                    if (msg.includes(ex)) return false;
+                }
+                return true;
+            });
+
             rows = rows.slice().sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
             if (rows.length > 2000) rows = rows.slice(rows.length - 2000);
 
@@ -3319,6 +4130,329 @@
             logBuffer = [];
             renderLogs();
         }
+
+        // ============================================================
+        // 网络资产拓扑图（ReactFlow 可视化）
+        // ============================================================
+        let assetReactRoot = null;
+        let assetGraphData = { nodes: [], edges: [] };
+        let assetSearchKeyword = '';
+
+        // 域名管理页 Tab 切换（域名列表 / 网络资产拓扑）
+        function switchDomainTab(tab) {
+            const listTab = document.getElementById('domainListTab');
+            const assetTab = document.getElementById('assetTopologyTab');
+            const listBtn = document.getElementById('domainTabBtn');
+            const assetBtn = document.getElementById('assetTabBtn');
+            if (!listTab || !assetTab) return;
+
+            if (tab === 'assets') {
+                listTab.style.display = 'none';
+                assetTab.style.display = 'block';
+                listBtn.style.borderBottomColor = 'transparent';
+                listBtn.style.color = '#64748b';
+                listBtn.style.fontWeight = '400';
+                assetBtn.style.borderBottomColor = '#3b82f6';
+                assetBtn.style.color = '#3b82f6';
+                assetBtn.style.fontWeight = '600';
+                // 切换到资产 Tab 时加载域名下拉列表
+                loadAssetDomainSelect();
+            } else {
+                listTab.style.display = 'block';
+                assetTab.style.display = 'none';
+                assetBtn.style.borderBottomColor = 'transparent';
+                assetBtn.style.color = '#64748b';
+                assetBtn.style.fontWeight = '400';
+                listBtn.style.borderBottomColor = '#3b82f6';
+                listBtn.style.color = '#3b82f6';
+                listBtn.style.fontWeight = '600';
+            }
+        }
+
+        // 加载域名列表到资产页下拉框
+        async function loadAssetDomainSelect() {
+            const sel = document.getElementById('assetDomainSelect');
+            if (!sel) return;
+            const domains = await fetchAPI('/domains') || [];
+            sel.innerHTML = '<option value="">选择域名...</option>';
+            domains.forEach(d => {
+                const opt = document.createElement('option');
+                opt.value = d.id;
+                opt.textContent = d.name;
+                sel.appendChild(opt);
+            });
+        }
+
+        // 触发资产扫描
+        async function triggerAssetScan() {
+            const domainId = document.getElementById('assetDomainSelect').value;
+            if (!domainId) { showToast('请先选择域名'); return; }
+            showToast('资产扫描已启动，请等待 20-60 秒后点击"刷新图谱"查看结果');
+            const result = await fetchAPI('/assets/scan/' + domainId, { method: 'POST' });
+            if (result && result.message) {
+                showToast(result.message);
+            }
+            // 延迟 25 秒后自动刷新
+            setTimeout(() => refreshAssetGraph(), 25000);
+        }
+
+        // 从图谱 API 刷新
+        async function refreshAssetGraph() {
+            const domainId = document.getElementById('assetDomainSelect').value;
+            if (!domainId) { showToast('请先选择域名'); return; }
+            showToast('正在加载资产图谱...');
+            const graph = await fetchAPI('/assets/graph/' + domainId);
+            if (graph && graph.data) {
+                // 将 API 节点格式转换为 ReactFlow 格式
+                const apiNodes = graph.data.nodes || [];
+                const apiEdges = graph.data.edges || [];
+                // 按类型分层布局：domain→subdomain→ip→port→service
+                const typeX = { domain: 80, subdomain: 280, ip: 480, port: 680, service: 880 };
+                const typeCounters = {};
+                const rfNodes = apiNodes.map(n => {
+                    const t = n.type || 'default';
+                    if (!typeCounters[t]) typeCounters[t] = 0;
+                    const idx = typeCounters[t]++;
+                    const x = typeX[t] || 680;
+                    const y = 60 + idx * 110;
+                    return {
+                        id: n.id,
+                        position: { x: x, y: y },
+                        data: {
+                            label: n.label || n.id,
+                            type: t,
+                            sublabel: n.sub_label || '',
+                            status: n.status || ''
+                        }
+                    };
+                });
+                const rfEdges = apiEdges.map(e => ({
+                    id: e.id || ('e-' + e.source + '-' + e.target),
+                    source: e.source,
+                    target: e.target,
+                    label: e.label || '',
+                    animated: true
+                }));
+                assetGraphData = { nodes: rfNodes, edges: rfEdges };
+                renderAssetGraph(assetGraphData);
+                showToast('图谱加载完成: ' + rfNodes.length + ' 节点, ' + rfEdges.length + ' 边');
+            } else {
+                showToast('暂无资产数据，请先扫描资产');
+            }
+            const list = await fetchAPI('/assets/list/' + domainId);
+            if (list && list.data) {
+                renderAssetTableFromList(list.data);
+            }
+        }
+
+        // 从扫描结果渲染图谱
+        function renderAssetGraphFromData(scanData) {
+            const nodes = [];
+            const edges = [];
+            // Domain 节点
+            nodes.push({ id: scanData.domain_id, type: 'default', position: { x: 350, y: 20 }, data: { label: scanData.domain_name, type: 'domain' } });
+            // IP 节点
+            scanData.ips.forEach((ip, i) => {
+                const y = 120 + i * 120;
+                nodes.push({ id: ip.id, type: 'default', position: { x: 200, y: y }, data: { label: ip.address, type: 'ip', sublabel: ip.version, status: ip.is_alive ? 'alive' : 'down' } });
+                edges.push({ id: 'e-domain-ip-' + i, source: scanData.domain_id, target: ip.id, label: '解析' });
+            });
+            // Port 节点
+            scanData.ports.forEach((port, i) => {
+                const y = 100 + i * 100;
+                nodes.push({ id: port.id, type: 'default', position: { x: 500, y: y }, data: { label: String(port.port), type: 'port', sublabel: port.service_name, status: port.state } });
+                // 关联到 IP
+                const ipNode = scanData.ips.find(ip => ip.address === port.ip_address);
+                if (ipNode) edges.push({ id: 'e-ip-port-' + i, source: ipNode.id, target: port.id, label: '暴露' });
+            });
+            // Service 节点
+            scanData.services.forEach((svc, i) => {
+                const y = 80 + i * 90;
+                const label = svc.name + (svc.version ? ' ' + svc.version : '');
+                nodes.push({ id: svc.id, type: 'default', position: { x: 800, y: y }, data: { label: label, type: 'service', sublabel: svc.title } });
+                const portNode = scanData.ports.find(p => p.ip_address === svc.ip_address && p.port === svc.port_num);
+                if (portNode) edges.push({ id: 'e-port-svc-' + i, source: portNode.id, target: svc.id, label: '运行' });
+            });
+            assetGraphData = { nodes, edges };
+            renderAssetGraph(assetGraphData);
+        }
+
+        // 渲染资产表格（扫描结果）
+        function renderAssetTable(scanData) {
+            const tbody = document.getElementById('assetTableBody');
+            if (!tbody) return;
+            if (!scanData.ports || scanData.ports.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#64748b;">未发现开放端口</td></tr>';
+                return;
+            }
+            tbody.innerHTML = '';
+            scanData.ports.forEach(port => {
+                const svc = scanData.services.find(s => s.ip_address === port.ip_address && s.port_num === port.port);
+                const tr = document.createElement('tr');
+                tr.innerHTML = '<td>' + port.ip_address + '</td>' +
+                    '<td>IPv4</td>' +
+                    '<td style="color:#10b981;">存活</td>' +
+                    '<td><strong>' + port.port + '</strong></td>' +
+                    '<td>' + (port.service_name || '-') + '</td>' +
+                    '<td><span style="color:#10b981;">开放</span></td>' +
+                    '<td>' + (svc ? svc.name : '-') + '</td>' +
+                    '<td>' + (svc ? svc.version : '-') + '</td>' +
+                    '<td>' + (svc ? (svc.title || '-') : '-') + '</td>';
+                tbody.appendChild(tr);
+            });
+        }
+
+        // 渲染资产表格（列表 API）
+        function renderAssetTableFromList(assets) {
+            const tbody = document.getElementById('assetTableBody');
+            if (!tbody) return;
+            if (!assets || assets.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#64748b;">暂无数据</td></tr>';
+                return;
+            }
+            tbody.innerHTML = '';
+            assets.forEach(a => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = '<td>' + (a.ip || '-') + '</td>' +
+                    '<td>' + (a.ip_version || '-') + '</td>' +
+                    '<td>' + (a.alive === 'true' ? '<span style="color:#10b981;">存活</span>' : '<span style="color:#ef4444;">离线</span>') + '</td>' +
+                    '<td><strong>' + (a.port || '-') + '</strong></td>' +
+                    '<td>' + (a.service || '-') + '</td>' +
+                    '<td>' + (a.state || '-') + '</td>' +
+                    '<td>' + (a.svc_name || '-') + '</td>' +
+                    '<td>' + (a.svc_version || '-') + '</td>' +
+                    '<td>' + (a.svc_title || '-') + '</td>';
+                tbody.appendChild(tr);
+            });
+        }
+
+        // 使用 ReactFlow 渲染拓扑图
+        function renderAssetGraph(graphData) {
+            const container = document.getElementById('assetGraphContainer');
+            if (!container) return;
+            const placeholder = document.getElementById('assetGraphPlaceholder');
+            if (placeholder) placeholder.style.display = 'none';
+
+            const rf = window.ReactFlow;
+            if (!rf) { showToast('ReactFlow 库加载失败，请检查网络'); return; }
+            const React = window.React;
+            const ReactDOM = window.ReactDOM;
+            if (!React || !ReactDOM) return;
+
+            // 搜索过滤
+            const kw = assetSearchKeyword.toLowerCase();
+            let filteredNodes = (graphData.nodes || []).slice();
+            let filteredEdges = (graphData.edges || []).slice();
+            if (kw) {
+                const matchedIds = new Set();
+                filteredNodes.forEach(n => {
+                    const label = ((n.data && n.data.label) || '').toString().toLowerCase();
+                    const sublabel = ((n.data && n.data.sublabel) || '').toString().toLowerCase();
+                    if (label.includes(kw) || sublabel.includes(kw)) matchedIds.add(n.id);
+                });
+                filteredEdges = filteredEdges.filter(e => matchedIds.has(e.source) || matchedIds.has(e.target));
+                filteredNodes = filteredNodes.filter(n => matchedIds.has(n.id) || filteredEdges.some(e => e.source === n.id || e.target === n.id));
+            }
+
+            // 节点样式映射：纯文本标签 + CSS class
+            const styledNodes = filteredNodes.map(n => {
+                const d = n.data || {};
+                const t = d.type || 'default';
+                let cls = 'asset-node node-' + t;
+                if (t === 'ip' && d.status === 'down') cls += ' down';
+                // 构建标签文本（含子标签）
+                let labelText = d.label || n.id;
+                if (d.sublabel) labelText += '\n' + d.sublabel;
+                return {
+                    id: n.id,
+                    position: n.position || { x: 0, y: 0 },
+                    className: cls,
+                    data: { label: labelText, ...d }
+                };
+            });
+
+            const initialEdges = filteredEdges.map(e => ({
+                id: e.id || ('e-' + e.source + '-' + e.target),
+                source: e.source,
+                target: e.target,
+                type: 'smoothstep',
+                label: e.label || '',
+                animated: true,
+                style: { stroke: '#64748b', strokeWidth: 2 }
+            }));
+            const containerStyle = { width: '100%', height: '100%' };
+
+            function GraphComponent() {
+                const onNodeClick = (event, node) => showAssetDetail(node);
+                return React.createElement(rf.ReactFlow, {
+                    nodes: styledNodes,
+                    edges: initialEdges,
+                    onNodeClick: onNodeClick,
+                    fitView: true,
+                    style: containerStyle,
+                    attributionPosition: 'bottom-right',
+                },
+                    React.createElement(rf.Background, { color: '#e2e8f0', gap: 16 }),
+                    React.createElement(rf.Controls, null),
+                    React.createElement(rf.MiniMap, { nodeColor: (n) => {
+                        const t = n.data && n.data.type;
+                        const colors = { domain: '#8b5cf6', subdomain: '#06b6d4', ip: '#3b82f6', port: '#f59e0b', service: '#10b981' };
+                        return colors[t] || '#64748b';
+                    } })
+                );
+            }
+
+            if (!assetReactRoot) {
+                assetReactRoot = ReactDOM.createRoot(container);
+            }
+            assetReactRoot.render(React.createElement(GraphComponent));
+            // 触发 resize 让 ReactFlow 重新计算边路径（容器从隐藏变可见时需要）
+            setTimeout(() => window.dispatchEvent(new Event('resize')), 100);
+        }
+
+        // 显示节点详情
+        function showAssetDetail(node) {
+            const panel = document.getElementById('assetDetailPanel');
+            const title = document.getElementById('assetDetailTitle');
+            const type = document.getElementById('assetDetailType');
+            const body = document.getElementById('assetDetailBody');
+            if (!panel || !title || !type || !body) return;
+
+            const data = node.data || {};
+            title.textContent = data.label || node.id;
+            const typeMap = { domain: '域名', subdomain: '子域名', ip: 'IP 地址', port: '端口', service: '应用服务' };
+            type.textContent = '类型: ' + (typeMap[data.type] || data.type || '未知');
+            let html = '';
+            if (data.sublabel) html += '<div><strong>附加信息:</strong> ' + data.sublabel + '</div>';
+            if (data.status) html += '<div><strong>状态:</strong> ' + data.status + '</div>';
+            html += '<div><strong>节点 ID:</strong> ' + node.id + '</div>';
+            body.innerHTML = html;
+            panel.style.display = 'block';
+        }
+
+        function closeAssetDetail() {
+            const panel = document.getElementById('assetDetailPanel');
+            if (panel) panel.style.display = 'none';
+        }
+
+        // 资产页搜索过滤
+        document.addEventListener('DOMContentLoaded', function() {
+            const searchInput = document.getElementById('assetSearchInput');
+            if (searchInput) {
+                searchInput.addEventListener('input', function() {
+                    assetSearchKeyword = this.value.trim();
+                    if (assetGraphData.nodes.length > 0) {
+                        renderAssetGraph(assetGraphData);
+                    }
+                });
+            }
+            const domainSelect = document.getElementById('assetDomainSelect');
+            if (domainSelect) {
+                domainSelect.addEventListener('change', function() {
+                    if (this.value) refreshAssetGraph();
+                });
+            }
+        });
     </script>
 </body>
 </html>

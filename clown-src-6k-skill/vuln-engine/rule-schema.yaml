@@ -1,0 +1,131 @@
+# =============================================================================
+# 漏洞规则 Schema 定义
+# Vulnerability Rule Schema (YAML Format)
+# =============================================================================
+# 所有 rules/ 目录下的规则文件必须遵循此 Schema
+# 规则源自 clown-src-6k-skill/skills/skill/知识库/ 下的 40+ 实战方法论
+# =============================================================================
+
+# 规则唯一标识
+id: "rule-{category}-{name}"                    # 必填，如 rule-injection-sqli
+name: "漏洞名称"                                # 必填
+name_cn: "漏洞中文名"                           # 必填
+description: "漏洞描述，含触发条件和影响"       # 必填
+
+# OWASP 分类
+owasp_category: "A03-injection"                # 必填，OWASP Top 10 (2021)
+owasp_subcategory: "SQL Injection"             # 可选
+cwe_id: "CWE-89"                               # 必填，Common Weakness Enumeration
+
+# CVSS 3.1 评分
+cvss:
+  vector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+  base_score: 9.8
+  severity: "critical"  # critical/high/medium/low
+
+# 检测方法
+detection:
+  methods: ["DAST", "SAST"]                    # 必填，支持的检测方法
+  # DAST 检测信号（按特异性分层）
+  dast_signals:
+    high_specificity:                          # 高特异性信号：单命中即高置信度
+      - type: "error_message"
+        pattern: "SQL syntax.*MySQL|Warning.*pg_query|ORA-\\d{5}|SQLite/JDBCDriver|Microsoft SQL Server"
+        confidence: 0.95
+      - type: "boolean_differential"
+        pattern: "TRUE.*FALSE|1=1.*1=2"
+        confidence: 0.90
+    medium_specificity:                       # 中特异性信号：需 ≥2 命中
+      - type: "response_time"
+        pattern: "sleep\\(\\d+\\)|benchmark\\("
+        confidence: 0.75
+      - type: "content_diff"
+        pattern: "baseline_vs_probe_difference"
+        confidence: 0.70
+    low_specificity:                           # 低特异性信号：仅辅助
+      - type: "url_parameter"
+        pattern: "(id|cat|query|keyword|search|sort|order|filter)="
+        confidence: 0.30
+
+  # SAST 检测模式（正则匹配源码）
+  sast_patterns:
+    - language: "go"
+      pattern: "db\\.Query\\([^)]*\\+|fmt\\.Sprintf.*SELECT.*%s"
+      confidence: 0.80
+    - language: "python"
+      pattern: "cursor\\.execute\\([^)]*\\+|f['\"].*SELECT.*\\{"
+      confidence: 0.80
+    - language: "java"
+      pattern: "Statement\\.executeQuery\\([^)]*\\+|createQuery\\([^)]*\\+"
+      confidence: 0.80
+
+  # 多层确认配置
+  multi_layer:
+    enabled: true
+    min_signals: 2                             # 最少命中信号数
+    high_specificity_skips_min: true           # 高特异性信号单命中跳过 min_signals
+
+  # 误报过滤器
+  false_positive_filters:
+    - filter: "status_code"
+      condition: "status_code != 200"
+      action: "discard"
+    - filter: "content_validation"
+      condition: "no_vuln_evidence_in_response"
+      action: "downgrade"
+      target_confidence: "low"
+
+# PoC 生成模板
+poc:
+  enabled: true
+  # HTTP 请求模板（{{param}} 会被实际参数替换）
+  request_template: |
+    GET {{url}}?{{param}}={{payload}} HTTP/1.1
+    Host: {{host}}
+    User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
+    Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+    Accept-Language: zh-CN,zh;q=0.9,en;q=0.8
+    Connection: close
+
+  # Payload 列表（按风险等级排序）
+  payloads:
+    - name: "error_based"
+      value: "' OR '1'='1"
+      description: "布尔盲注基础 payload"
+      risk: "low"
+    - name: "union_based"
+      value: "' UNION SELECT NULL,username,password FROM users--"
+      description: "UNION 注入提取凭据"
+      risk: "high"
+    - name: "time_based"
+      value: "' AND SLEEP(5)--"
+      description: "时间盲注"
+      risk: "medium"
+
+  # 验证条件
+  verification:
+    - type: "response_diff"
+      description: "对比基线响应与 payload 响应的差异"
+    - type: "content_match"
+      pattern: "username|password|email"
+      description: "响应中出现敏感字段名"
+
+# 修复建议
+remediation:
+  priority: "P0"                               # P0/P1/P2/P3
+  summary: "使用参数化查询，禁止拼接 SQL 语句"
+  details:
+    - "所有数据库查询使用参数化绑定（PreparedStatement / $1, $2 / ? 占位符）"
+    - "对输入参数做白名单校验，禁止直接拼接到 SQL"
+    - "使用 ORM 框架的安全 API，避免原生 SQL 拼接"
+    - "最小权限原则：数据库账号只授予必要权限"
+    - "启用 Web Application Firewall (WAF) 作为纵深防御"
+  references:
+    - "https://owasp.org/Top10/A03_2021-Injection/"
+    - "https://cwe.mitre.org/data/definitions/89.html"
+
+# 知识来源
+knowledge_source:
+  file: "知识库/injection-test.md"
+  methodology: "src-value-hunting.md §3 注入探针矩阵"
+  last_reviewed: "2026-09-02"

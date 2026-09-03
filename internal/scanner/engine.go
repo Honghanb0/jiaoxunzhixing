@@ -69,12 +69,16 @@ type Engine struct {
 	cfg           *config.Config
 	crawler       *Crawler
 	detector      *Detector
+	assetScanner  *AssetScanner       // 网络资产扫描器（端口/服务/子域名）
 	domainRepo    *storage.DomainRepository
 	scanJobRepo   *storage.ScanJobRepository
 	vulnRepo      *storage.VulnerabilityRepository
 	sensitiveRepo *storage.SensitiveInfoRepository
 	pageRepo      *storage.PageRepository
+	assetRepo     *storage.AssetRepository // 资产图仓储
 	aiModule      *ai.AIModule
+	ruleEngine    *RuleEngine  // 企业级漏洞规则引擎
+	reporter      *Reporter    // 漏洞报告生成器（Markdown/JSON/HTML + 工单集成）
 
 	// 运行中任务的取消函数：scanJobID -> context.CancelFunc
 	cancels  sync.Map
@@ -91,9 +95,16 @@ func NewEngine(cfg *config.Config, store *storage.Neo4jStore, aiMgr *ai.Manager)
 	vulnRepo := storage.NewVulnerabilityRepository(store)
 	sensitiveRepo := storage.NewSensitiveInfoRepository(store)
 	pageRepo := storage.NewPageRepository(store)
+	assetRepo := storage.NewAssetRepository(store)
 
 	crawler := NewCrawler(&cfg.Scanner, domainRepo, pageRepo)
 	detector := NewDetector(&cfg.Scanner, &cfg.Sensitive, vulnRepo, sensitiveRepo)
+	assetScanner := NewAssetScanner()
+
+	// 初始化企业级规则引擎和报告生成器
+	ruleEngine := NewRuleEngine("")
+	detector.SetRuleEngine(ruleEngine)
+	reporter := NewReporter(ruleEngine)
 
 	if aiMgr == nil {
 		aiMgr = ai.NewManager(&cfg.AI)
@@ -104,14 +115,35 @@ func NewEngine(cfg *config.Config, store *storage.Neo4jStore, aiMgr *ai.Manager)
 		cfg:           cfg,
 		crawler:       crawler,
 		detector:      detector,
+		assetScanner:  assetScanner,
 		domainRepo:    domainRepo,
 		scanJobRepo:   scanJobRepo,
 		vulnRepo:      vulnRepo,
 		sensitiveRepo: sensitiveRepo,
 		pageRepo:      pageRepo,
+		assetRepo:     assetRepo,
 		aiModule:      aiModule,
+		ruleEngine:    ruleEngine,
+		reporter:      reporter,
 		stopCh:        make(chan struct{}),
 	}
+}
+
+// GenerateReport 为指定扫描任务生成多格式报告（Markdown/JSON/HTML）
+func (e *Engine) GenerateReport(scanJobID string, targetURL string) (*ReportBundle, error) {
+	results, err := e.GetScanResults(scanJobID)
+	if err != nil {
+		return nil, fmt.Errorf("获取扫描结果失败: %w", err)
+	}
+	if e.reporter == nil {
+		return nil, fmt.Errorf("报告生成器未初始化")
+	}
+	return e.reporter.GenerateReport(results.Vulnerabilities, targetURL), nil
+}
+
+// GetRuleEngine 获取规则引擎实例（供 API 层暴露规则查询接口）
+func (e *Engine) GetRuleEngine() *RuleEngine {
+	return e.ruleEngine
 }
 
 // maxScanDuration 单次扫描的最长允许时长
@@ -564,6 +596,98 @@ func (e *Engine) WaitForScanCompletion(jobID string, timeout time.Duration) (*Sc
 		case <-ticker.C:
 		}
 	}
+}
+
+// ScanAssets 对指定域名执行网络资产扫描（子域名枚举→DNS→端口扫描→服务识别）
+// 扫描结果异步保存到 Neo4j 图谱，返回扫描结果摘要。
+func (e *Engine) ScanAssets(ctx context.Context, domainID string) (*AssetScanSummary, error) {
+	domain, err := e.domainRepo.GetByID(domainID)
+	if err != nil {
+		return nil, fmt.Errorf("获取域名失败: %w", err)
+	}
+
+	// 提取纯域名/IP（去除 scheme/path/端口）
+	target := domain.Name
+	target = strings.TrimPrefix(target, "https://")
+	target = strings.TrimPrefix(target, "http://")
+	if idx := strings.Index(target, "/"); idx > 0 {
+		target = target[:idx]
+	}
+	// 去除端口号（如 127.0.0.1:8099 → 127.0.0.1）
+	if idx := strings.LastIndex(target, ":"); idx > 0 && !strings.Contains(target[idx+1:], ".") {
+		// 检查冒号后面是否是数字（端口）而不是 IPv6 的一部分
+		portPart := target[idx+1:]
+		isPort := true
+		for _, ch := range portPart {
+			if ch < '0' || ch > '9' {
+				isPort = false
+				break
+			}
+		}
+		if isPort {
+			target = target[:idx]
+		}
+	}
+
+	log.Printf("[Asset] 开始资产扫描: domain=%s id=%s", target, domainID)
+
+	// 使用清理后的目标名创建副本传给扫描器
+	scanDomain := &models.Domain{
+		ID:   domain.ID,
+		Name: target,
+	}
+	result, err := e.assetScanner.ScanDomain(ctx, scanDomain)
+	if err != nil {
+		return nil, fmt.Errorf("资产扫描失败: %w", err)
+	}
+
+	// 保存到 Neo4j 图谱
+	if err := e.assetRepo.SaveAssetScan(domainID, result.Subdomains, result.IPs, result.Ports, result.Services); err != nil {
+		log.Printf("[Asset] 保存资产结果部分失败: %v", err)
+		// 不返回错误，部分结果仍可用
+	}
+
+	summary := &AssetScanSummary{
+		DomainID:       domainID,
+		DomainName:     target,
+		SubdomainCount: len(result.Subdomains),
+		IPCount:        len(result.IPs),
+		PortCount:      len(result.Ports),
+		ServiceCount:   len(result.Services),
+		Subdomains:     result.Subdomains,
+		IPs:            result.IPs,
+		Ports:          result.Ports,
+		Services:       result.Services,
+	}
+
+	log.Printf("[Asset] 资产扫描完成: %s 子域名=%d IP=%d 端口=%d 服务=%d",
+		target, summary.SubdomainCount, summary.IPCount, summary.PortCount, summary.ServiceCount)
+
+	return summary, nil
+}
+
+// AssetScanSummary 资产扫描结果摘要
+type AssetScanSummary struct {
+	DomainID       string               `json:"domain_id"`
+	DomainName     string               `json:"domain_name"`
+	SubdomainCount int                  `json:"subdomain_count"`
+	IPCount        int                  `json:"ip_count"`
+	PortCount      int                  `json:"port_count"`
+	ServiceCount   int                  `json:"service_count"`
+	Subdomains     []*models.Subdomain  `json:"subdomains"`
+	IPs            []*models.IP         `json:"ips"`
+	Ports          []*models.Port       `json:"ports"`
+	Services       []*models.Service    `json:"services"`
+}
+
+// GetAssetGraph 获取域名的资产拓扑图数据
+func (e *Engine) GetAssetGraph(domainID string) (*models.AssetGraph, error) {
+	return e.assetRepo.GetAssetGraph(domainID)
+}
+
+// ListAssets 列出域名下所有资产明细
+func (e *Engine) ListAssets(domainID string) ([]map[string]any, error) {
+	return e.assetRepo.ListAssets(domainID)
 }
 
 func hasScheme(url string) bool {

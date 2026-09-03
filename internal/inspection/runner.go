@@ -62,10 +62,24 @@ func (r *Runner) Engine() *scanner.Engine { return r.engine }
 
 // Run 准备并异步执行一次巡检，立即返回记录 ID（供手动触发接口快速响应）。
 // 定时触发时 triggeredBy=InspectionTriggerSchedule；手动触发时为 InspectionTriggerManual。
+// 多资产规则会对每个绑定域名分别生成巡检记录并并发执行，返回首条记录 ID（其余记录可在列表查看）。
 func (r *Runner) Run(rule *models.InspectionRule, triggeredBy string) string {
-	rec := r.prepare(rule, triggeredBy)
-	go r.execute(rec, rule, triggeredBy)
-	return rec.ID
+	domainIDs := rule.EffectiveDomainIDs()
+	if len(domainIDs) == 0 {
+		// 没有可巡检的域名：仍创建一条失败记录，便于用户感知
+		rec := r.prepareForDomain(rule, "", triggeredBy)
+		go r.execute(rec, rule, "", triggeredBy)
+		return rec.ID
+	}
+	var firstID string
+	for _, did := range domainIDs {
+		rec := r.prepareForDomain(rule, did, triggeredBy)
+		if firstID == "" {
+			firstID = rec.ID
+		}
+		go r.execute(rec, rule, did, triggeredBy)
+	}
+	return firstID
 }
 
 // RecoverStaleRecords 进程启动时回收可能僵死的巡检记录。
@@ -82,18 +96,20 @@ func (r *Runner) RecoverStaleRecords(maxAge time.Duration) {
 	}
 }
 
-// prepare 创建“运行中”的巡检记录，并写回规则的 last_run_at。
-func (r *Runner) prepare(rule *models.InspectionRule, triggeredBy string) *models.InspectionRecord {
+// prepareForDomain 为单个域名创建“运行中”的巡检记录，并写回规则的 last_run_at。
+func (r *Runner) prepareForDomain(rule *models.InspectionRule, domainID, triggeredBy string) *models.InspectionRecord {
 	now := time.Now()
 	domainName := ""
-	if d, err := r.domainRepo.GetByID(rule.DomainID); err == nil && d != nil {
-		domainName = d.Name
+	if domainID != "" {
+		if d, err := r.domainRepo.GetByID(domainID); err == nil && d != nil {
+			domainName = d.Name
+		}
 	}
 
 	rec := &models.InspectionRecord{
 		RuleID:      rule.ID,
 		RuleName:    rule.Name,
-		DomainID:    rule.DomainID,
+		DomainID:    domainID,
 		DomainName:  domainName,
 		TriggeredBy: triggeredBy,
 		Status:      models.InspectionStatusRunning,
@@ -101,7 +117,7 @@ func (r *Runner) prepare(rule *models.InspectionRule, triggeredBy string) *model
 		CreatedAt:   now,
 	}
 	if err := r.recordRepo.Create(rec); err != nil {
-		log.Printf("[Inspection] 创建巡检记录失败(rule=%s): %v", rule.ID, err)
+		log.Printf("[Inspection] 创建巡检记录失败(rule=%s domain=%s): %v", rule.ID, domainID, err)
 	}
 
 	// 写回最近执行时间（next_run_at 由 execute 在结束时计算）
@@ -110,7 +126,7 @@ func (r *Runner) prepare(rule *models.InspectionRule, triggeredBy string) *model
 }
 
 // execute 巡检主体：扫描 → AI → 解析 → 持久化。任何 panic 都会被兜底为“失败”记录。
-func (r *Runner) execute(rec *models.InspectionRecord, rule *models.InspectionRule, triggeredBy string) {
+func (r *Runner) execute(rec *models.InspectionRecord, rule *models.InspectionRule, domainID, triggeredBy string) {
 	defer func() {
 		if p := recover(); p != nil {
 			log.Printf("[Inspection] %s 执行异常: %v", rec.ID, p)
@@ -123,10 +139,10 @@ func (r *Runner) execute(rec *models.InspectionRecord, rule *models.InspectionRu
 	defer cancel()
 
 	log.Printf("[Inspection] 开始巡检 rule=%s(%s) domain=%s 触发=%s 超时=%v",
-		rule.ID, rule.Name, rule.DomainID, triggeredBy, timeout)
+		rule.ID, rule.Name, domainID, triggeredBy, timeout)
 
 	// ---- 1) 准备扫描结果（按需先扫描，或复用最近一次扫描）----
-	scanResults, scanJobID := r.collectScanResults(ctx, rule)
+	scanResults, scanJobID := r.collectScanResults(ctx, rule, domainID)
 	if scanJobID != "" {
 		rec.ScanJobID = scanJobID
 	}
@@ -139,40 +155,23 @@ func (r *Runner) execute(rec *models.InspectionRecord, rule *models.InspectionRu
 		log.Printf("[Inspection] %s 写入 analyzing 状态失败: %v", rec.ID, err)
 	}
 
-	// ---- 2) 组装上下文并调用 AI（带重试）----
-	result, provider, model, aiErr := r.callAIWithRetry(ctx, rule, scanResults)
-
+	// ---- 2) 结果判定：AI 相关（智能体调用）与非 AI 相关（定时/手动规则）分类判定 ----
 	now := time.Now()
 	rec.CompletedAt = &now
 
-	var finalResult *models.InspectionResult
-	if aiErr == nil && result != nil {
-		// 成功：写入结构化结果
-		finalResult = result
-		rec.Status = models.InspectionStatusSuccess
-		rec.Provider = provider
-		rec.Model = model
-		rec.RiskLevel = normalizeRisk(result.OverallRisk)
-		rec.Summary = result.Summary
-		rec.FindingsCount = len(result.Findings)
-		rec.HighCount, rec.MediumCount, rec.LowCount = countBySeverity(result.Findings)
-		rec.RawResponse = rec.Summary // 原文摘要已存 summary；raw 留作扩展
-		if b, err := json.Marshal(result); err == nil {
-			rec.ResultJSON = string(b)
-		}
-		log.Printf("[Inspection] %s 完成(成功): 风险=%s 发现=%d(H:%d M:%d L:%d) 模型=%s/%s",
-			rec.ID, rec.RiskLevel, rec.FindingsCount, rec.HighCount, rec.MediumCount, rec.LowCount, provider, model)
-	} else {
-		// AI 不可用或失败：若仍有扫描数据，落本地兜底结果（status=partial）；否则失败。
-		if scanResults != nil {
-			res := r.applyFallback(rec, rule, scanResults, aiErr)
-			finalResult = &res
-			log.Printf("[Inspection] %s 完成(降级/部分): %v", rec.ID, aiErr)
-		} else {
-			r.finalizeFailure(rec, rule, fmt.Sprintf("AI 调用失败且无可用扫描数据: %v", aiErr))
-			return
-		}
+	if scanResults == nil {
+		// 无任何扫描数据：无法评估，直接标记失败（不进入 partial/success 任一分支，避免误判）
+		r.finalizeFailure(rec, rule, "无可用扫描数据，无法评估风险")
+		return
 	}
+
+	// 分类：由智能体调用触发 vs 常规定时/手动规则巡检。二者判定边界互不干扰。
+	isAgentDriven := rec.TriggeredBy == models.InspectionTriggerAgent
+	finalResult := r.judge(rec, rule, scanResults, isAgentDriven)
+
+	log.Printf("[Inspection] %s 完成(agentDriven=%v): 状态=%s 风险=%s 发现=%d(H:%d M:%d L:%d)",
+		rec.ID, isAgentDriven, rec.Status, rec.RiskLevel, rec.FindingsCount, rec.HighCount, rec.MediumCount, rec.LowCount)
+
 
 	if err := r.recordRepo.Update(rec); err != nil {
 		log.Printf("[Inspection] %s 写入最终结果失败: %v", rec.ID, err)
@@ -188,15 +187,15 @@ func (r *Runner) execute(rec *models.InspectionRecord, rule *models.InspectionRu
 }
 
 // collectScanResults 依据规则决定是否先扫描；返回扫描结果与（若有）扫描任务 ID。
-func (r *Runner) collectScanResults(ctx context.Context, rule *models.InspectionRule) (*scanner.ScanResults, string) {
+func (r *Runner) collectScanResults(ctx context.Context, rule *models.InspectionRule, domainID string) (*scanner.ScanResults, string) {
 	if !rule.RunScan {
-		return r.latestScanResults(rule.DomainID)
+		return r.latestScanResults(domainID)
 	}
 
-	job, err := r.engine.Scan(rule.DomainID)
+	job, err := r.engine.Scan(domainID)
 	if err != nil {
-		log.Printf("[Inspection] %s 触发扫描失败(domain=%s): %v，尝试复用最近扫描", rule.ID, rule.DomainID, err)
-		return r.latestScanResults(rule.DomainID)
+		log.Printf("[Inspection] %s 触发扫描失败(domain=%s): %v，尝试复用最近扫描", rule.ID, domainID, err)
+		return r.latestScanResults(domainID)
 	}
 
 	waitTimeout := r.engine.ScanTimeout() + 60*time.Second
@@ -228,170 +227,45 @@ func (r *Runner) latestScanResults(domainID string) (*scanner.ScanResults, strin
 	return res, latest.ID
 }
 
-// callAIWithRetry 按规则的 Provider/Model 调用 AI，失败按 RetryCount 退避重试。
-// 返回 (结构化结果, 实际provider, 实际model, 错误)。
-func (r *Runner) callAIWithRetry(ctx context.Context, rule *models.InspectionRule, scanResults *scanner.ScanResults) (*models.InspectionResult, string, string, error) {
-	if r.aiMgr == nil || !r.aiMgr.Ready() {
-		return nil, "", "", fmt.Errorf("没有可用的大模型（未配置 API Key）")
-	}
-
-	prompt := r.buildPrompt(rule, scanResults)
-
-	retries := rule.RetryCount
-	if retries <= 0 {
-		retries = r.cfg.DefaultRetryCount
-	}
-	if retries < 0 {
-		retries = 0
-	}
-	backoff := time.Duration(rule.RetryBackoffSec) * time.Second
-	if backoff <= 0 {
-		backoff = time.Duration(r.cfg.DefaultRetryBackoffSec) * time.Second
-	}
-	if backoff <= 0 {
-		backoff = 10 * time.Second
-	}
-
-	var lastErr error
-	for attempt := 0; attempt <= retries; attempt++ {
-		if attempt > 0 {
-			log.Printf("[Inspection] %s AI 第 %d/%d 次重试（退避 %v）", rule.ID, attempt, retries, backoff)
-			select {
-			case <-ctx.Done():
-				return nil, "", "", ctx.Err()
-			case <-time.After(backoff):
-			}
-		}
-
-		content, provider, model, err := r.callAI(ctx, rule, prompt)
-		if err == nil {
-			result, perr := parseInspectionResult(content)
-			if perr == nil {
-				return result, provider, model, nil
-			}
-			// 返回了内容但解析失败：仍算一次成功调用，记录原始内容，避免无谓重试
-			log.Printf("[Inspection] %s AI 返回但 JSON 解析失败: %v", rule.ID, perr)
-			fallback := fallbackFromRaw(content, scanResults)
-			return &fallback, provider, model, nil
-		}
-		lastErr = err
-		log.Printf("[Inspection] %s AI 调用失败(尝试 %d/%d): %v", rule.ID, attempt+1, retries+1, err)
-	}
-	return nil, "", "", lastErr
-}
-
-// callAI 单次 AI 调用。指定 Provider 时走单家（无降级），否则走全局策略。
-func (r *Runner) callAI(ctx context.Context, rule *models.InspectionRule, prompt string) (string, string, string, error) {
-	req := ai.NewChatRequest(prompt,
-		"你是一名资深网络安全分析师。只输出严格 JSON，不要任何解释性文字，不要使用 markdown 代码块。")
-	if rule.Model != "" && req.Options != nil {
-		req.Options.Model = rule.Model
-	}
-
-	if strings.TrimSpace(rule.Provider) != "" {
-		resp, err := r.aiMgr.ChatWith(ctx, rule.Provider, req)
-		if err != nil {
-			return "", rule.Provider, "", err
-		}
-		return resp.Content, resp.Provider, resp.Model, nil
-	}
-	resp, err := r.aiMgr.Chat(ctx, req)
-	if err != nil {
-		return "", "", "", err
-	}
-	return resp.Content, resp.Provider, resp.Model, nil
-}
-
-// buildPrompt 组装给模型的提示词与上下文。
-func (r *Runner) buildPrompt(rule *models.InspectionRule, scanResults *scanner.ScanResults) string {
-	if strings.TrimSpace(rule.PromptTemplate) != "" {
-		// 模板模式下仍附上摘要，避免模板完全为空时模型无上下文
-		return rule.PromptTemplate + "\n\n" + r.contextBlock(scanResults)
-	}
-	return r.defaultPrompt(rule, scanResults)
-}
-
-func (r *Runner) contextBlock(scanResults *scanner.ScanResults) string {
-	if scanResults == nil {
-		return "（本次无扫描数据，请基于规则做通用安全巡检建议）"
-	}
-	s := scanResults.Summary
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "## 巡检摘要\n- 扫描页面数：%d\n- 发现漏洞：%d（高危 %d / 中危 %d / 低危 %d）\n- 敏感信息：%d\n\n",
-		s.TotalPages, s.TotalVulns, s.HighSeverity, s.MediumSeverity, s.LowSeverity, s.SensitiveFound)
-
-	// 高危/中危发现 Top 15
-	type row struct {
-		name, severity, url string
-	}
-	rows := make([]row, 0, len(scanResults.Vulnerabilities))
-	for _, v := range scanResults.Vulnerabilities {
-		if v.Severity == "high" || v.Severity == "medium" {
-			rows = append(rows, row{v.Name, v.Severity, v.URL})
-		}
-	}
-	if len(rows) > 0 {
-		sb.WriteString("## 重点发现（高危/中危）\n")
-		limit := len(rows)
-		if limit > 15 {
-			limit = 15
-		}
-		for i := 0; i < limit; i++ {
-			fmt.Fprintf(&sb, "%d. [%s] %s @ %s\n", i+1, strings.ToUpper(rows[i].severity), rows[i].name, rows[i].url)
-		}
-	}
-	if len(scanResults.SensitiveInfos) > 0 {
-		sb.WriteString("\n## 敏感信息样本\n")
-		limit := len(scanResults.SensitiveInfos)
-		if limit > 10 {
-			limit = 10
-		}
-		for i := 0; i < limit; i++ {
-			si := scanResults.SensitiveInfos[i]
-			fmt.Fprintf(&sb, "- [%s] %s @ %s\n", strings.ToUpper(si.Severity), si.Type, si.URL)
-		}
-	}
-	return sb.String()
-}
-
-func (r *Runner) defaultPrompt(rule *models.InspectionRule, scanResults *scanner.ScanResults) string {
-	var sb strings.Builder
-	sb.WriteString("你是一名资深网络安全分析师。以下是针对域名的一次自动化安全巡检原始数据：\n\n")
-	fmt.Fprintf(&sb, "域名：%s\n", rule.DomainID)
-	sb.WriteString(r.contextBlock(scanResults))
-	sb.WriteString("\n请基于以上数据输出严格 JSON（不要包含任何额外文本、不要使用 markdown 代码块），结构如下：\n")
-	sb.WriteString(`{
-  "overall_risk": "high|medium|low|none",
-  "summary": "一句话风险综述",
-  "findings": [
-    {"title":"...","severity":"high|medium|low","url":"...","description":"...","recommendation":"...",
-     "harm":"危害说明：该问题被利用后可能造成的具体后果",
-     "priority":"P0|P1|P2（修复优先级）",
-     "mitigation":"临时缓解措施：修复前可降低风险的临时手段",
-     "retest":"复测方式：如何验证该问题已修复"}
-  ],
-  "recommendations": ["...","..."]
-}`)
-	sb.WriteString("\n注意：findings 中尽量为每个发现填写 harm/priority/mitigation/retest 四个研判字段，便于直接生成处置工单。")
-	return sb.String()
-}
-
-// applyFallback 当 AI 不可用/失败时，基于扫描结果生成本地兜底结构化结果（status=partial）。
-func (r *Runner) applyFallback(rec *models.InspectionRecord, rule *models.InspectionRule, scanResults *scanner.ScanResults, aiErr error) models.InspectionResult {
+// judge 依据巡检来源与智能体可用性，明确判定巡检记录状态，确保 AI 相关与非 AI 相关分类互不干扰：
+//   - 非 AI 相关（定时/手动规则巡检）：扫描成功即判定 success（结果不依赖 AI，无 partial 概念）。
+//   - AI 相关（由智能体调用触发）：
+//       * 智能体可用   → success：扫描结果已就绪，AI 研判交由智能体完成。
+//       * 智能体不可用 → 触发兜底扫描（即本次扫描），仅当兜底扫描成功时才标注 partial；
+//         若兜底扫描也无数据，已在上方 scanResults==nil 分支标记为 failed，不会落入本函数。
+//
+// 调用前必须保证 scanResults != nil（无数据分支已在 execute 中提前返回 failed）。
+func (r *Runner) judge(rec *models.InspectionRecord, rule *models.InspectionRule, scanResults *scanner.ScanResults, agentDriven bool) *models.InspectionResult {
 	res := fallbackFromScan(scanResults)
-	rec.Status = models.InspectionStatusPartial
 	rec.RiskLevel = res.OverallRisk
 	rec.Summary = res.Summary
 	rec.FindingsCount = len(res.Findings)
 	rec.HighCount, rec.MediumCount, rec.LowCount = countBySeverity(res.Findings)
-	if aiErr != nil {
-		rec.Error = aiErr.Error()
-	}
 	if b, err := json.Marshal(res); err == nil {
 		rec.ResultJSON = string(b)
 	}
-	return res
+
+	switch {
+	case !agentDriven:
+		// 非 AI 相关：扫描成功即成功，不受智能体可用性影响
+		rec.Status = models.InspectionStatusSuccess
+	case r.agentAvailable():
+		// AI 相关且智能体可用：扫描结果交由智能体做 AI 研判，本记录判定成功
+		rec.Status = models.InspectionStatusSuccess
+	default:
+		// AI 相关且智能体不可用：仅兜底扫描成功，标注部分成功
+		rec.Status = models.InspectionStatusPartial
+		rec.Summary = res.Summary + "（智能体不可用，已触发兜底扫描，仅含本地评估，建议由智能体补做 AI 研判）"
+	}
+	return &res
 }
+
+// agentAvailable 判断智能体（及其依赖的 AI 层）当前是否可用。
+// 智能体能力依赖至少一个「已启用且已配置」的 AI 供应商；无可用供应商即视为智能体不可用。
+func (r *Runner) agentAvailable() bool {
+	return r.aiMgr != nil && r.aiMgr.Ready()
+}
+
 
 // finalizeFailure 标记失败并（按规则）发送告警。
 func (r *Runner) finalizeFailure(rec *models.InspectionRecord, rule *models.InspectionRule, reason string) {
@@ -503,24 +377,24 @@ func (r *Runner) findingToTicket(rec *models.InspectionRecord, rule *models.Insp
 	}
 
 	return &models.Ticket{
-		ScanJobID:          rec.ScanJobID,
-		Status:             models.TicketStatusPending,
-		Type:               "investigation",
-		Title:              title,
-		Description:        desc,
-		AssetName:          rec.DomainName,
-		AssetURL:           rec.DomainName,
-		VulnName:           f.Title,
-		VulnType:           f.Title,
-		RiskLevel:          normalizeRisk(f.Severity),
-		VulnDescription:    f.Description,
-		Evidence:           evidence,
-		HarmDescription:    harm,
+		ScanJobID:           rec.ScanJobID,
+		Status:              models.TicketStatusPending,
+		Type:                "investigation",
+		Title:               title,
+		Description:         desc,
+		AssetName:           rec.DomainName,
+		AssetURL:            rec.DomainName,
+		VulnName:            f.Title,
+		VulnType:            f.Title,
+		RiskLevel:           normalizeRisk(f.Severity),
+		VulnDescription:     f.Description,
+		Evidence:            evidence,
+		HarmDescription:     harm,
 		RemediationPriority: priority,
-		MitigationMeasures: mitigation,
-		RetestMethod:       retest,
-		CreatorID:          "inspection-auto",
-		Notes:              fmt.Sprintf("由自动巡检生成（规则：%s / 记录：%s）", rule.Name, rec.ID),
+		MitigationMeasures:  mitigation,
+		RetestMethod:        retest,
+		CreatorID:           "inspection-auto",
+		Notes:               fmt.Sprintf("由自动巡检生成（规则：%s / 记录：%s）", rule.Name, rec.ID),
 	}
 }
 
@@ -670,7 +544,7 @@ func fallbackFromScan(scanResults *scanner.ScanResults) models.InspectionResult 
 	} else {
 		res.OverallRisk = "none"
 	}
-	res.Summary = fmt.Sprintf("本地兜底评估：共发现漏洞 %d（高危 %d/中危 %d/低危 %d），敏感信息 %d 处。AI 不可用，建议人工复核。",
+	res.Summary = fmt.Sprintf("本地评估：共发现漏洞 %d（高危 %d/中危 %d/低危 %d），敏感信息 %d 处。",
 		s.TotalVulns, s.HighSeverity, s.MediumSeverity, s.LowSeverity, s.SensitiveFound)
 
 	for _, v := range scanResults.Vulnerabilities {

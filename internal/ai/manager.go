@@ -175,6 +175,7 @@ func (m *Manager) Get(name string) (Provider, error) {
 	return p, nil
 }
 
+
 // SetDefault 运行时切换默认模型与调用策略（空字符串表示不修改）
 func (m *Manager) SetDefault(name, strategy string) error {
 	m.mu.Lock()

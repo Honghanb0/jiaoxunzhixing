@@ -131,6 +131,27 @@ func getStr(props map[string]any, key string) string {
 	return ""
 }
 
+// getStringSlice 读取 Neo4j 字符串数组属性。兼容 Neo4j 驱动返回的 []any 与 []string 两种形态。
+func getStringSlice(props map[string]any, key string) []string {
+	v, ok := props[key]
+	if !ok || v == nil {
+		return nil
+	}
+	switch x := v.(type) {
+	case []string:
+		return x
+	case []any:
+		out := make([]string, 0, len(x))
+		for _, e := range x {
+			if s, ok := e.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
+}
+
 func getTimeVal(props map[string]any, key string) time.Time {
 	if v, ok := props[key].(time.Time); ok {
 		return v

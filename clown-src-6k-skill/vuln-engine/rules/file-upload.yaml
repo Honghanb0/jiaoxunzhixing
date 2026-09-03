@@ -1,0 +1,66 @@
+id: "rule-file-upload"
+name: "Unrestricted File Upload"
+name_cn: "任意文件上传"
+description: "文件上传功能未正确校验文件类型和内容，攻击者可上传可执行文件获取服务器权限"
+
+owasp_category: "A04-insecure-design"
+owasp_subcategory: "File Upload"
+cwe_id: "CWE-434"
+
+cvss:
+  vector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+  base_score: 9.8
+  severity: "critical"
+
+detection:
+  methods: ["DAST"]
+  dast_signals:
+    high_specificity:
+      - type: "uploaded_file_executable"
+        pattern: "uploaded_file_accessible_and_executes_code"
+        confidence: 0.98
+    medium_specificity:
+      - type: "upload_endpoint_detected"
+        pattern: "(multipart/form-data.*file|/upload|/file/upload|import.*file)"
+        confidence: 0.65
+    low_specificity:
+      - type: "file_input_form"
+        pattern: "<input[^>]*type=[\"']file[\"']"
+        confidence: 0.30
+  multi_layer:
+    enabled: true
+    min_signals: 2
+    high_specificity_skips_min: true
+  false_positive_filters:
+    - filter: "content_validation"
+      condition: "no_upload_endpoint_in_response"
+      action: "discard"
+
+poc:
+  enabled: true
+  payloads:
+    - name: "extension_bypass"
+      value: "shell.php5"
+      description: "扩展名绕过测试"
+      risk: "high"
+  verification:
+    - type: "file_accessible"
+      description: "上传文件可通过 URL 访问"
+    - type: "code_executes"
+      description: "访问上传文件时代码被执行"
+
+remediation:
+  priority: "P0"
+  summary: "严格校验文件类型和内容，上传文件与执行环境隔离"
+  details:
+    - "使用白名单校验文件扩展名，禁止可执行扩展名"
+    - "校验文件内容魔数，不仅看扩展名"
+    - "上传文件存储在非 Web 根目录的独立存储"
+    - "重命名上传文件为随机文件名"
+  references:
+    - "https://owasp.org/www-community/vulnerabilities/Unrestricted_File_Upload"
+    - "https://cwe.mitre.org/data/definitions/434.html"
+
+knowledge_source:
+  file: "知识库/file-upload-test.md"
+  methodology: "src-value-hunting.md 文件通道→可执行/SSRF/越权链"

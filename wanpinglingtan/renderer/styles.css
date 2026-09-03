@@ -1,0 +1,297 @@
+/* ==========================================================================
+   万平灵探 - 样式表（深色专业安全工具风格）
+   ========================================================================== */
+
+:root {
+  --bg-0: #0e1420;
+  --bg-1: #141c2b;
+  --bg-2: #1a2436;
+  --bg-3: #212d42;
+  --border: #2a3750;
+  --border-soft: #223049;
+  --text-0: #e8edf7;
+  --text-1: #a9b6cd;
+  --text-2: #6f7f9b;
+  --accent: #3d8bfd;
+  --accent-2: #5aa2ff;
+  --ok: #29c76f;
+  --warn: #f0ad3e;
+  --err: #f45b5b;
+  --purple: #9b7dfb;
+  --footer-h: 40px;
+  --header-h: 62px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+
+body {
+  font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", system-ui, sans-serif;
+  background: var(--bg-0);
+  color: var(--text-0);
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------------- 顶部标题栏 ---------------- */
+.app-header {
+  height: var(--header-h);
+  flex: 0 0 var(--header-h);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 18px;
+  background: linear-gradient(180deg, #141c2b, #101725);
+  border-bottom: 1px solid var(--border);
+}
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand-logo {
+  width: 40px; height: 40px; border-radius: 9px;
+  display: grid; place-items: center;
+  background: var(--bg-2);
+  border: 1px solid var(--border-soft);
+  overflow: hidden;
+}
+.brand-logo img { height: 34px; width: auto; max-width: 40px; object-fit: contain; display: block; }
+.brand-text h1 { font-size: 16px; font-weight: 700; letter-spacing: .5px; }
+.brand-text span { font-size: 11px; color: var(--text-2); }
+
+.header-stats { display: flex; gap: 10px; }
+.stat {
+  min-width: 64px; text-align: center; padding: 6px 10px;
+  background: var(--bg-2); border: 1px solid var(--border-soft);
+  border-radius: 8px;
+}
+.stat-num { display: block; font-size: 18px; font-weight: 700; color: var(--accent-2); }
+.stat-label { font-size: 11px; color: var(--text-2); }
+
+/* ---------------- 主体 ---------------- */
+.app-main {
+  flex: 1 1 auto;
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+  min-height: 0;
+}
+.panel {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.panel-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px; border-bottom: 1px solid var(--border-soft);
+}
+.panel-head h2 { font-size: 14px; font-weight: 600; }
+.panel-hint { font-size: 11px; color: var(--text-2); }
+
+.panel-form { flex: 0 0 360px; }
+.form-body { padding: 12px 14px; overflow-y: auto; flex: 1; }
+.field { margin-bottom: 13px; }
+.field label {
+  display: block; font-size: 12px; color: var(--text-1);
+  margin-bottom: 5px; font-weight: 600;
+}
+.field label em { font-style: normal; color: var(--text-2); font-weight: 400; margin-left: 6px; font-size: 11px; }
+.field textarea, .field input[type=text], .field input[type=password], .field input[type=number] {
+  width: 100%; padding: 8px 10px; border-radius: 8px;
+  background: var(--bg-0); border: 1px solid var(--border);
+  color: var(--text-0); font-size: 12px; font-family: inherit; resize: vertical;
+}
+.field textarea:focus, .field input:focus {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(61,139,253,.18);
+}
+.field input::placeholder, .field textarea::placeholder { color: #4d5a73; }
+
+.adv { margin: 4px 0 12px; border: 1px solid var(--border-soft); border-radius: 8px; overflow: hidden; }
+.adv summary { cursor: pointer; padding: 9px 12px; background: var(--bg-2); color: var(--text-1); font-size: 12px; user-select: none; }
+.adv-body { padding: 10px 12px; display: grid; gap: 8px; }
+.chk { display: flex; align-items: center; gap: 7px; color: var(--text-1); font-size: 12px; }
+.adv-inline { display: flex; align-items: center; gap: 8px; }
+.adv-inline input { width: 80px; padding: 6px 8px; border-radius: 7px; background: var(--bg-0); border: 1px solid var(--border); color: var(--text-0); }
+
+.form-actions { display: flex; gap: 10px; margin-top: 6px; }
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 9px 16px; border: none; border-radius: 9px; cursor: pointer;
+  font-size: 13px; font-weight: 600; font-family: inherit; color: #fff;
+  transition: filter .15s, opacity .15s;
+}
+.btn:hover { filter: brightness(1.1); }
+.btn-primary { background: linear-gradient(135deg, var(--accent), #2f6fd6); flex: 1; }
+.btn-ghost { background: var(--bg-3); color: var(--text-1); }
+.btn:disabled { opacity: .55; cursor: not-allowed; }
+
+/* ---------------- 右侧结果面板 ---------------- */
+.panel-results { flex: 1 1 auto; }
+.results-head { gap: 10px; }
+.tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+.tab {
+  background: transparent; border: 1px solid transparent; color: var(--text-1);
+  padding: 6px 11px; border-radius: 8px; cursor: pointer; font-size: 12px; font-family: inherit;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.tab:hover { background: var(--bg-2); }
+.tab.active { background: var(--bg-3); color: var(--text-0); border-color: var(--border); }
+.badge {
+  background: rgba(61,139,253,.2); color: var(--accent-2);
+  border-radius: 10px; padding: 0 7px; font-size: 11px; min-width: 18px; text-align: center;
+}
+.results-tools { display: flex; align-items: center; gap: 7px; }
+.filter-input {
+  width: 150px; padding: 6px 9px; border-radius: 7px;
+  background: var(--bg-0); border: 1px solid var(--border); color: var(--text-0); font-size: 12px;
+}
+.btn-mini { padding: 6px 11px; font-size: 12px; background: var(--bg-3); color: var(--text-1); border-radius: 7px; }
+
+.progress-bar { height: 3px; background: var(--bg-0); }
+.progress-fill { height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--purple)); transition: width .3s; }
+
+.results-body { flex: 1 1 auto; overflow-y: auto; padding: 10px 12px; min-height: 0; }
+.tab-pane { display: none; }
+.tab-pane.active { display: block; }
+.empty { color: var(--text-2); text-align: center; padding: 40px 10px; font-size: 12px; }
+
+/* 数据行 */
+.row {
+  display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+  border-bottom: 1px solid var(--border-soft); font-size: 12px;
+}
+.row:hover { background: var(--bg-2); }
+.row .mono { font-family: "Consolas", "Courier New", monospace; color: var(--accent-2); word-break: break-all; }
+.row .meta { color: var(--text-2); font-size: 11px; }
+.row .tag { font-size: 10px; padding: 1px 6px; border-radius: 5px; background: var(--bg-3); color: var(--text-1); }
+.row .grow { flex: 1; min-width: 0; }
+
+/* 表格形式（DNS/WHOIS） */
+.kv { display: grid; grid-template-columns: 120px 1fr; gap: 4px 12px; padding: 6px 10px; font-size: 12px; }
+.kv dt { color: var(--text-2); }
+.kv dd { color: var(--text-0); word-break: break-all; }
+
+/* ---------------- 控制台 ---------------- */
+.console {
+  flex: 0 0 200px; border-top: 1px solid var(--border);
+  display: flex; flex-direction: column; min-height: 0; background: var(--bg-0);
+}
+.console-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 7px 12px; border-bottom: 1px solid var(--border-soft);
+}
+.console-head > span { font-size: 12px; color: var(--text-1); font-weight: 600; }
+.stage-track { display: flex; gap: 5px; flex-wrap: wrap; }
+.stage-chip {
+  font-size: 10px; padding: 2px 8px; border-radius: 10px;
+  background: var(--bg-2); color: var(--text-2); border: 1px solid var(--border-soft);
+}
+.stage-chip.running { background: rgba(240,173,62,.15); color: var(--warn); border-color: rgba(240,173,62,.4); }
+.stage-chip.done { background: rgba(41,199,111,.15); color: var(--ok); border-color: rgba(41,199,111,.4); }
+.console-body { flex: 1; overflow-y: auto; padding: 8px 12px; font-family: "Consolas", monospace; font-size: 11.5px; line-height: 1.6; }
+.console-body .line { white-space: pre-wrap; word-break: break-all; }
+.lv-info { color: var(--text-1); }
+.lv-success { color: var(--ok); }
+.lv-warn { color: var(--warn); }
+.lv-error { color: var(--err); }
+
+/* ---------------- 底部版权 ---------------- */
+.app-footer {
+  flex: 0 0 var(--footer-h);
+  height: var(--footer-h);
+  display: flex; align-items: center; justify-content: center;
+  background: #0b1118;
+  border-top: 1px solid var(--border);
+}
+.copyright { font-size: 12px; color: var(--text-1); letter-spacing: .3px; }
+.copyright::before { content: "© "; }
+
+/* 滚动条 */
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb { background: #2c3a54; border-radius: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* 全局标签配色（风险/状态） */
+.tag-ok { color: var(--ok) !important; background: rgba(41,199,111,.14) !important; }
+.tag-warn { color: var(--warn) !important; background: rgba(240,173,62,.14) !important; }
+.tag-danger { color: var(--err) !important; background: rgba(239,68,68,.16) !important; }
+
+/* ---------------- 人工审计 ---------------- */
+.audit-toolbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  flex-wrap: wrap; padding: 10px 12px; border-bottom: 1px solid var(--border-soft);
+}
+.audit-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.audit-actions .sep { width: 1px; height: 18px; background: var(--border-soft); margin: 0 4px; }
+.audit-count { font-size: 12px; color: var(--text-1); margin-left: 6px; }
+.audit-toolbar .btn-primary { flex: 0 0 auto; }
+.audit-hint { padding: 8px 12px; font-size: 12px; }
+.audit-table-wrap { padding: 4px 10px 14px; overflow-y: auto; }
+table.audit-table, table.secscan-table {
+  width: 100%; border-collapse: collapse; font-size: 12px;
+}
+table.audit-table th, table.audit-table td,
+table.secscan-table th, table.secscan-table td {
+  border: 1px solid var(--border-soft); padding: 7px 9px; text-align: left; vertical-align: middle;
+}
+table.audit-table th, table.secscan-table th {
+  background: var(--bg-2); color: var(--text-1); font-weight: 600;
+}
+table.audit-table tbody tr:nth-child(even),
+table.secscan-table tbody tr:nth-child(even) { background: var(--bg-1); }
+table.audit-table .col-sel, table.secscan-table .col-sel { width: 36px; text-align: center; }
+.audit-verdict { padding: 4px 6px; border-radius: 6px; background: var(--bg-3); color: var(--text-0); border: 1px solid var(--border-soft); }
+
+/* ---------------- 安全扫描 ---------------- */
+.secscan-progress { padding: 8px 12px; }
+.secscan-progress #secscanStatus { font-size: 12px; color: var(--text-1); display: block; margin-bottom: 5px; }
+.secscan-table td .mono, .secscan-table td.mono { font-family: "Consolas","Courier New",monospace; color: var(--accent-2); word-break: break-all; }
+
+/* ---------------- EASM 报告 ---------------- */
+.report-actions { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--border-soft); }
+.report-fmt-label { font-size: 12px; color: var(--text-2); }
+.report-preview { padding: 10px 12px; }
+
+/* ---------------- 高级选项提示 ---------------- */
+.adv-hint { font-style: normal; color: #94a3b8; font-size: 11px; margin-left: 6px; }
+
+/* ---------------- 漏洞分类标签 ---------------- */
+.cat-tag { display:inline-block; padding:1px 8px; border-radius:10px; font-size:11px; font-weight:600; line-height:1.7; border:1px solid transparent; white-space:nowrap; }
+.cat-文件上传 { color:#b45309; background:rgba(245,158,11,.16); border-color:rgba(245,158,11,.4); }
+.cat-反序列化 { color:#7c3aed; background:rgba(124,58,237,.16); border-color:rgba(124,58,237,.4); }
+.cat-SSRF { color:#0d9488; background:rgba(13,148,136,.16); border-color:rgba(13,148,136,.4); }
+.cat-CSRF { color:#2563eb; background:rgba(37,99,235,.16); border-color:rgba(37,99,235,.4); }
+.cat-未授权访问 { color:#dc2626; background:rgba(220,38,38,.16); border-color:rgba(220,38,38,.4); }
+.cat-SQL注入 { color:#ea580c; background:rgba(234,88,12,.16); border-color:rgba(234,88,12,.4); }
+.cat-XSS { color:#db2777; background:rgba(219,39,119,.16); border-color:rgba(219,39,119,.4); }
+.cat-整数溢出 { color:#4f46e5; background:rgba(79,70,229,.16); border-color:rgba(79,70,229,.4); }
+.cat-代码注入 { color:#be123c; background:rgba(190,18,60,.16); border-color:rgba(190,18,60,.4); }
+.cat-路径遍历 { color:#0891b2; background:rgba(8,145,178,.16); border-color:rgba(8,145,178,.4); }
+.cat-缓冲区溢出 { color:#6d28d9; background:rgba(109,40,217,.16); border-color:rgba(109,40,217,.4); }
+.cat-其他 { color:#64748b; background:rgba(100,116,139,.16); border-color:rgba(100,116,139,.4); }
+
+/* ---------------- 漏洞卡片 ---------------- */
+.vuln-card { border:1px solid var(--border-soft); border-left:3px solid var(--ok); border-radius:8px; padding:8px 11px; margin-bottom:8px; background:var(--bg-1); }
+.vuln-card.sev-high { border-left-color: var(--err); }
+.vuln-card.sev-medium { border-left-color: var(--warn); }
+.vuln-card.sev-low { border-left-color: var(--accent-2); }
+.vuln-card.sev-info { border-left-color: var(--text-2); }
+.vuln-card .vuln-title { font-weight:600; color:var(--text-1); }
+.vuln-card .vuln-meta { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin:5px 0 2px; }
+.vuln-card .vuln-detail { font-size:12px; color:var(--text-2); margin-top:3px; }
+.vuln-card .vuln-evidence { font-size:11px; color:var(--text-2); margin-top:3px; font-family:"Consolas","Courier New",monospace; word-break:break-all; }
+
+/* ---------------- 人工审计增强 ---------------- */
+.audit-ip, .audit-geo { font-family:"Consolas","Courier New",monospace; color:var(--text-2); font-size:11px; word-break:break-all; }
+.audit-alive.ok { color:var(--ok); font-weight:600; }
+.audit-alive.bad { color:var(--err); }
+.audit-noscan { color:var(--text-2); font-size:11px; font-style:italic; }
+.audit-meta { font-size:11px; color:var(--text-2); max-width:280px; word-break:break-all; }
+
+/* 安全扫描结果中展示的关联漏洞行 */
+.secscan-table .vuln-row { display:flex; gap:7px; flex-wrap:wrap; align-items:center; margin:3px 0; }
+.secscan-table .vuln-row .mono { font-size:11.5px; color:var(--accent-2); word-break:break-all; }
+
+

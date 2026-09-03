@@ -1,0 +1,109 @@
+id: "rule-broken-authentication"
+name: "Broken Authentication"
+name_cn: "认证机制失效"
+description: "身份验证机制存在缺陷，如弱密码策略、无登录限制、会话固定、默认凭据、明文传输等，导致攻击者可绕过认证或接管账号"
+
+owasp_category: "A07-auth-failures"
+owasp_subcategory: "Authentication Failures"
+cwe_id: "CWE-287"
+
+cvss:
+  vector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+  base_score: 9.8
+  severity: "critical"
+
+detection:
+  methods: ["DAST"]
+  dast_signals:
+    high_specificity:
+      - type: "default_credentials_login"
+        pattern: "login_success_with_admin_admin_or_admin_password"
+        confidence: 0.98
+      - type: "brute_force_unlimited"
+        pattern: "no_rate_limit_after_100_failed_logins"
+        confidence: 0.90
+      - type: "session_fixation"
+        pattern: "session_id_not_rotated_after_login"
+        confidence: 0.85
+    medium_specificity:
+      - type: "weak_password_policy"
+        pattern: "password_accepted_with_less_than_8_chars_or_no_complexity"
+        confidence: 0.70
+      - type: "no_2fa"
+        pattern: "sensitive_actions_without_mfa"
+        confidence: 0.60
+      - type: "token_in_url"
+        pattern: "session_token_in_query_string"
+        confidence: 0.75
+    low_specificity:
+      - type: "cookie_not_secure"
+        pattern: "session_cookie_missing_secure_or_httponly_flag"
+        confidence: 0.50
+  multi_layer:
+    enabled: true
+    min_signals: 2
+    high_specificity_skips_min: true
+  false_positive_filters:
+    - filter: "mfa_enabled"
+      condition: "multi_factor_authentication_required"
+      action: "downgrade"
+      target_confidence: "low"
+
+poc:
+  enabled: true
+  request_template: |
+    POST {{url}}/login HTTP/1.1
+    Host: {{host}}
+    User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)
+    Content-Type: application/x-www-form-urlencoded
+    Content-Length: {{len}}
+    Connection: close
+
+    username={{username}}&password={{payload}}
+  payloads:
+    - name: "default_admin"
+      value: "admin"
+      description: "默认管理员密码"
+      risk: "medium"
+    - name: "weak_password"
+      value: "123456"
+      description: "弱密码字典"
+      risk: "low"
+    - name: "sql_auth_bypass"
+      value: "' OR '1'='1'--"
+      description: "SQL 注入认证绕过"
+      risk: "high"
+    - name: "jwt_alg_none"
+      value: "{{jwt_with_alg_none}}"
+      description: "JWT alg=none 绕过"
+      risk: "critical"
+    - name: "jwt_secret_crack"
+      value: "{{jwt_signed_with_weak_secret}}"
+      description: "JWT 弱密钥破解"
+      risk: "high"
+  verification:
+    - type: "login_success"
+      description: "使用弱密码/默认密码登录成功"
+    - type: "rate_limit_missing"
+      description: "连续 100 次失败登录无锁定"
+    - type: "session_not_rotated"
+      description: "登录前后 Session ID 不变"
+
+remediation:
+  priority: "P0"
+  summary: "实施强密码策略、多因素认证、登录限制和安全会话管理"
+  details:
+    - "强制密码复杂度：至少 12 字符，含大小写字母、数字、符号"
+    - "实施账户锁定：连续 5 次失败锁定 15 分钟"
+    - "启用多因素认证（MFA）"
+    - "登录成功后轮换 Session ID"
+    - "Session Cookie 设置 HttpOnly + Secure + SameSite=Strict"
+    - "JWT 使用强密钥（≥256位），禁止 alg=none"
+    - "禁止默认凭据，首次登录强制修改密码"
+  references:
+    - "https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/"
+    - "https://cwe.mitre.org/data/definitions/287.html"
+
+knowledge_source:
+  file: "知识库/authbypass-test.md"
+  methodology: "dig-scope-workflow §4.2.2 发会话/重置/改绑/换票链"

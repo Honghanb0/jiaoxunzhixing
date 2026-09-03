@@ -1,6 +1,7 @@
 package api
 
 import (
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -36,6 +37,13 @@ type UpdateRoleRequest struct {
 	// 此处若强制 required，会让「只改权限级别」的调用直接 400。
 	Role      string `json:"role,omitempty"`
 	RoleLevel int    `json:"role_level"`
+}
+
+// ChangePasswordRequest 改密码请求。
+// 改自己时需要 current_password 校验；管理员改他人可不传（管理员覆盖）。
+type ChangePasswordRequest struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password" binding:"required,min=6,max=128"`
 }
 
 // Register 注册新用户。普通访客只能注册为 user 角色；
@@ -219,6 +227,67 @@ func (h *AuthHandler) DeleteUser(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "用户已删除", "user": sanitizeUser(user)})
+}
+
+// ChangePassword 修改用户密码。
+//   - 改自己：需提供 current_password 且校验通过（任何已登录用户均可改自己）。
+//   - 改他人：需管理员权限（role_level>=3），无需当前密码（管理员覆盖）。
+func (h *AuthHandler) ChangePassword(c *gin.Context) {
+	id := c.Param("id")
+
+	var req ChangePasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	currentUserID := CurrentUserID(c)
+	if currentUserID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未认证"})
+		return
+	}
+
+	selfChange := currentUserID == id
+	if !selfChange && GetRoleLevelFromContext(c) < models.RoleLevelAdmin {
+		c.JSON(http.StatusForbidden, gin.H{"error": "仅管理员可修改其他用户密码"})
+		return
+	}
+
+	user, err := h.userRepo.GetByID(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "用户不存在"})
+		return
+	}
+
+	if selfChange {
+		if req.CurrentPassword == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "修改自身密码需提供当前密码"})
+			return
+		}
+		if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.CurrentPassword)); err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "当前密码错误"})
+			return
+		}
+	}
+
+	if len(req.NewPassword) < 6 || len(req.NewPassword) > 128 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "新密码长度需为 6~128 位"})
+		return
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "密码加密失败"})
+		return
+	}
+	user.PasswordHash = string(hash)
+	if err := h.userRepo.Update(user); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新密码失败: " + err.Error()})
+		return
+	}
+
+	log.Printf("[Auth] 密码已更新 id=%s username=%s self=%v", id, user.Username, selfChange)
+	c.JSON(http.StatusOK, gin.H{"message": "密码已更新", "user": sanitizeUser(user)})
 }
 
 // sanitizeUser 去除敏感字段后返回用户对象。

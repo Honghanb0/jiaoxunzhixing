@@ -8,6 +8,7 @@
 package logutil
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -147,6 +148,13 @@ func (w *writer) Write(p []byte) (int, error) {
 // Install 接管标准库 log 输出：写入环形缓冲（供 /api/logs 拉取），
 // 并可选落盘到 logsDir/server.log、同时保留 stdout。
 // 多次调用安全（仅首次生效）。
+//
+// 跨平台说明：logsDir 通常为相对路径（依赖进程工作目录）。Windows 下以服务/计划任务
+// 启动时工作目录可能是 System32，Linux 下以 systemd 启动时可能是 /，二者都可能不可写
+// （且 Linux 非 root 用户无权创建 /logs）。此时不应当让整个日志采集失效，因此：
+//  1. 先尝试配置的 logsDir；
+//  2. 失败则回退到 os.TempDir()/security-agent-logs（Windows 与 Linux 均保证可写）；
+//  3. 回退也失败则仅保留 stdout + 环形缓冲，并输出告警，绝不因日志落盘失败而阻断启动。
 func Install(logsDir string) {
 	mu.Lock()
 	if installed {
@@ -158,15 +166,33 @@ func Install(logsDir string) {
 
 	w := &writer{stdout: os.Stdout}
 	if logsDir != "" {
-		_ = os.MkdirAll(logsDir, 0o755)
-		f, err := os.OpenFile(filepath.Join(logsDir, "server.log"),
-			os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-		if err == nil {
-			w.file = f
+		w.file = openLogFile(logsDir)
+		if w.file == nil {
+			// 工作目录不可写时回退到系统临时目录，保证 Linux/Windows 服务化部署同样可用
+			fallback := filepath.Join(os.TempDir(), "security-agent-logs")
+			if f := openLogFile(fallback); f != nil {
+				w.file = f
+				fmt.Fprintf(os.Stderr, "[logutil] 日志目录 %q 不可用，已回退到 %q\n", logsDir, fallback)
+			} else {
+				fmt.Fprintf(os.Stderr, "[logutil] 日志文件不可用（已尝试 %q 与 %q），仅输出到 stdout 与内存缓冲\n", logsDir, fallback)
+			}
 		}
 	}
 	// 接管标准库 log 输出：后续所有 log 输出进入环形缓冲（并保留 stdout/落盘）。
 	log.SetOutput(w)
+}
+
+// openLogFile 在 dir 下以追加方式打开 server.log；任一环节失败返回 nil（不 panic、不阻断启动）。
+func openLogFile(dir string) *os.File {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "server.log"),
+		os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return nil
+	}
+	return f
 }
 
 // Tail 返回序号大于 after 的最近 entries（最多 limit 条），用于增量拉取。

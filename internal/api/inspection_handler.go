@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"security-agent/internal/ai"
@@ -39,18 +40,33 @@ func NewInspectionHandler(
 // ---------- 请求结构体 ----------
 
 type createRuleRequest struct {
-	Name             string `json:"name" binding:"required"`
-	DomainID         string `json:"domain_id" binding:"required"`
-	Enabled          *bool  `json:"enabled"`        // 缺省=true（启用）
-	Schedule         string `json:"schedule" binding:"required"`
-	Provider         string `json:"provider"`
-	Model            string `json:"model"`
-	PromptTemplate   string `json:"prompt_template"`
-	SeverityThreshold string `json:"severity_threshold"`
-	RunScan          *bool  `json:"run_scan"`       // 缺省=true（先扫描）
-	RetryCount       int    `json:"retry_count"`
-	RetryBackoffSec  int    `json:"retry_backoff_sec"`
-	AlertOnFailure   *bool  `json:"alert_on_failure"`
+	Name              string   `json:"name" binding:"required"`
+	DomainID          string   `json:"domain_id"`          // 单资产（向后兼容）
+	DomainIDs         []string `json:"domain_ids"`         // 多资产绑定（优先于 domain_id）
+	Enabled           *bool    `json:"enabled"`            // 缺省=true（启用）
+	Schedule          string   `json:"schedule" binding:"required"`
+	SeverityThreshold string   `json:"severity_threshold"`
+	RunScan           *bool    `json:"run_scan"`           // 缺省=true（先扫描）
+	RetryCount        int      `json:"retry_count"`
+	RetryBackoffSec   int      `json:"retry_backoff_sec"`
+	AlertOnFailure    *bool    `json:"alert_on_failure"`
+}
+
+// resolveDomainIDs 归一化请求中的目标域名列表：优先 domain_ids，其次单值 domain_id。
+func (req *createRuleRequest) resolveDomainIDs() []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(req.DomainIDs)+1)
+	for _, id := range req.DomainIDs {
+		id = strings.TrimSpace(id)
+		if id != "" && !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	if len(out) == 0 && strings.TrimSpace(req.DomainID) != "" {
+		out = append(out, strings.TrimSpace(req.DomainID))
+	}
+	return out
 }
 
 // ---------- 规则 CRUD ----------
@@ -83,10 +99,17 @@ func (h *InspectionHandler) CreateRule(c *gin.Context) {
 		return
 	}
 
-	// 校验域名存在
-	if _, err := h.domainRepo.GetByID(req.DomainID); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "关联的域名不存在: " + req.DomainID})
+	domainIDs := req.resolveDomainIDs()
+	if len(domainIDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请至少选择一个关联域名"})
 		return
+	}
+	// 校验所有关联域名均存在
+	for _, did := range domainIDs {
+		if _, err := h.domainRepo.GetByID(did); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "关联的域名不存在: " + did})
+			return
+		}
 	}
 
 	// 校验 cron 表达式（提前暴露格式错误，避免注册到调度器后才失败）
@@ -96,18 +119,16 @@ func (h *InspectionHandler) CreateRule(c *gin.Context) {
 	}
 
 	rule := &models.InspectionRule{
-		Name:             req.Name,
-		DomainID:         req.DomainID,
-		Enabled:          req.Enabled == nil || *req.Enabled, // 缺省启用
-		Schedule:         req.Schedule,
-		Provider:         req.Provider,
-		Model:            req.Model,
-		PromptTemplate:   req.PromptTemplate,
+		Name:              req.Name,
+		DomainID:          domainIDs[0],
+		DomainIDs:         domainIDs,
+		Enabled:           req.Enabled == nil || *req.Enabled, // 缺省启用
+		Schedule:          req.Schedule,
 		SeverityThreshold: req.SeverityThreshold,
-		RunScan:          req.RunScan == nil || *req.RunScan, // 缺省先扫描
-		RetryCount:       req.RetryCount,
-		RetryBackoffSec:  req.RetryBackoffSec,
-		AlertOnFailure:   req.AlertOnFailure != nil && *req.AlertOnFailure,
+		RunScan:           req.RunScan == nil || *req.RunScan, // 缺省先扫描
+		RetryCount:        req.RetryCount,
+		RetryBackoffSec:   req.RetryBackoffSec,
+		AlertOnFailure:    req.AlertOnFailure != nil && *req.AlertOnFailure,
 	}
 
 	if err := h.ruleRepo.Create(rule); err != nil {
@@ -138,9 +159,16 @@ func (h *InspectionHandler) UpdateRule(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if _, err := h.domainRepo.GetByID(req.DomainID); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "关联的域名不存在: " + req.DomainID})
+	domainIDs := req.resolveDomainIDs()
+	if len(domainIDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请至少选择一个关联域名"})
 		return
+	}
+	for _, did := range domainIDs {
+		if _, err := h.domainRepo.GetByID(did); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "关联的域名不存在: " + did})
+			return
+		}
 	}
 	if _, err := scheduler.ParseSchedule(req.Schedule); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Cron 表达式无效: " + err.Error()})
@@ -148,14 +176,12 @@ func (h *InspectionHandler) UpdateRule(c *gin.Context) {
 	}
 
 	rule.Name = req.Name
-	rule.DomainID = req.DomainID
+	rule.DomainID = domainIDs[0]
+	rule.DomainIDs = domainIDs
 	if req.Enabled != nil {
 		rule.Enabled = *req.Enabled
 	}
 	rule.Schedule = req.Schedule
-	rule.Provider = req.Provider
-	rule.Model = req.Model
-	rule.PromptTemplate = req.PromptTemplate
 	rule.SeverityThreshold = req.SeverityThreshold
 	if req.RunScan != nil {
 		rule.RunScan = *req.RunScan

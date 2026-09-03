@@ -3,12 +3,33 @@ bin/
 *.exe
 *.exe~
 security-agent
+sa_*.exe
+sa_v*.exe
+sa_ai.exe~
 *.test
 *.out
 
 # ========== 运行时日志 ==========
 logs/
 *.log
+run.log
+run.err.log
+server.log
+server_run.log
+server_verify.log
+neo4j_console.log
+sa_ai.log
+sa_v3_run.log
+sa_v3_run.err
+verify_out.log
+
+# ========== Electron 桌面应用构建产物（wanpinglingtan / wanpingqiuzhen）==========
+wanpinglingtan/dist/
+wanpinglingtan/dist_bak/
+wanpinglingtan/.electron-tmp/
+wanpinglingtan/_build.log
+wanpinglingtan/node_modules/
+wanpingqiuzhen/node_modules/
 
 # ========== Python ==========
 __pycache__/
@@ -17,7 +38,11 @@ __pycache__/
 # ========== 配置与密钥（含真实凭据，勿入库）==========
 config.yaml
 config.test.yaml
+config.8099.yaml
+config.mock.yaml
 .env
+token.txt
+hengnao_brief_report.txt
 
 # ========== 数据库数据 ==========
 data/
@@ -52,3 +77,7 @@ verify_site/
 sa_*.exe
 sa_v*.exe
 sa_ai.exe~
+.after_scan.ps1
+.baseline_scan.ps1
+baseline_before.json
+baseline_after.json

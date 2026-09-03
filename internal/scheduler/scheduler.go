@@ -153,13 +153,13 @@ func (s *Scheduler) AddRuleTask(rule *models.InspectionRule) error {
 	}
 	s.running[rule.ID] = entryID
 
+	nextStr := "未知"
 	if next := s.cron.Entry(entryID).Next; !next.IsZero() {
 		_ = s.ruleRepo.UpdateRunTimes(rule.ID, nil, &next)
-		log.Printf("[Scheduler] 已注册巡检规则 %s(%s) cron=%q 下次运行=%s",
-			rule.Name, rule.ID, rule.Schedule, next.Format("2006-01-02 15:04:05"))
-	} else {
-		log.Printf("[Scheduler] 已注册巡检规则 %s(%s) cron=%q", rule.Name, rule.ID, rule.Schedule)
+		nextStr = next.Format("2006-01-02 15:04:05")
 	}
+	log.Printf("[Scheduler] 已注册巡检规则 %s(%s) cron=%q 下次运行=%s",
+		rule.Name, rule.ID, rule.Schedule, nextStr)
 	return nil
 }
 
@@ -184,8 +184,14 @@ func (s *Scheduler) RemoveDomainTasks(domainID string) {
 		return
 	}
 	for _, r := range rules {
-		if r != nil && r.DomainID == domainID {
-			s.RemoveRuleTask(r.ID)
+		if r == nil {
+			continue
+		}
+		for _, did := range r.EffectiveDomainIDs() {
+			if did == domainID {
+				s.RemoveRuleTask(r.ID)
+				break
+			}
 		}
 	}
 }
@@ -207,6 +213,17 @@ func (s *Scheduler) TriggerManual(ruleID string) (string, error) {
 		return "", err
 	}
 	return s.runner.Run(rule, models.InspectionTriggerManual), nil
+}
+
+// TriggerByAgent 由自主智能体调用，触发一条巡检规则并标记为 agent 来源。
+// 标记为 agent 后，巡检结果判定会区分「智能体可用→success / 智能体不可用→兜底扫描成功才 partial」，
+// 与定时/手动规则巡检（扫描成功即 success）互不干扰。
+func (s *Scheduler) TriggerByAgent(ruleID string) (string, error) {
+	rule, err := s.ruleRepo.GetByID(ruleID)
+	if err != nil {
+		return "", err
+	}
+	return s.runner.Run(rule, models.InspectionTriggerAgent), nil
 }
 
 // TriggerManualScan 纯扫描（供“扫描任务”页手动触发，不触发 AI 巡检），返回扫描任务。

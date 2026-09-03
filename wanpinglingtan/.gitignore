@@ -1,0 +1,28 @@
+# 依赖（自动安装，不提交）
+node_modules/
+.pnp/
+.pnp.js
+
+# 打包产物（electron-builder 输出）
+dist/
+dist_bak/
+out/
+release/
+*.exe
+*.msi
+*.zip
+*.blockmap
+
+# 日志与临时
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# 沙箱 / 系统残留目录（非项目内容）
+%SystemDrive%/
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+*.swp

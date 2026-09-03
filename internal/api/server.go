@@ -1,12 +1,15 @@
 package api
 
 import (
+	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"security-agent/internal/agent"
 	"security-agent/internal/ai"
 	"security-agent/internal/config"
 	"security-agent/internal/models"
@@ -15,7 +18,7 @@ import (
 	"security-agent/internal/storage"
 )
 
-// NewServer 构建 HTTP 服务（内部创建扫描引擎、模型路由中心与调度器）。
+// NewServer 构建 HTTP 服务（内部创建扫描引擎、模型路由中心、调度器与自主智能体）。
 func NewServer(cfg *config.Config, store *storage.Neo4jStore) *Server {
 	aiMgr := ai.NewManager(&cfg.AI)
 	engine := scanner.NewEngine(cfg, store, aiMgr)
@@ -24,13 +27,14 @@ func NewServer(cfg *config.Config, store *storage.Neo4jStore) *Server {
 		storage.NewSensitiveInfoRepository(store),
 		storage.NewAlertRepository(store))
 	sched := scheduler.NewSchedulerWithInspection(&cfg.Scheduler, store, engine, alertSvc, aiMgr)
-	return NewServerWithEngine(cfg, store, engine, aiMgr, sched)
+	agentMgr := agent.NewManager(&cfg.Agent, aiMgr, store, engine, sched)
+	return NewServerWithEngine(cfg, store, engine, aiMgr, sched, agentMgr)
 }
 
-// NewServerWithEngine 使用外部创建好的扫描引擎、模型路由中心与调度器构建服务。
-// 调度器实例由调用方(main)统一创建并 Start()，再注入此处——确保 HTTP 层与
+// NewServerWithEngine 使用外部创建好的扫描引擎、模型路由中心、调度器与自主智能体构建服务。
+// 调度器/智能体实例由调用方(main)统一创建并 Start()，再注入此处——确保 HTTP 层与
 // main 共用同一个“已启动”的实例，否则界面保存的 Cron 只会注册到未启动的副本上。
-func NewServerWithEngine(cfg *config.Config, store *storage.Neo4jStore, engine *scanner.Engine, aiMgr *ai.Manager, sched *scheduler.Scheduler) *Server {
+func NewServerWithEngine(cfg *config.Config, store *storage.Neo4jStore, engine *scanner.Engine, aiMgr *ai.Manager, sched *scheduler.Scheduler, agentMgr *agent.Manager) *Server {
 	gin.SetMode(cfg.Server.Mode)
 
 	router := gin.New()
@@ -69,6 +73,13 @@ func NewServerWithEngine(cfg *config.Config, store *storage.Neo4jStore, engine *
 	aiHandler := NewAIHandler(aiMgr)
 	inspHandler := NewInspectionHandler(ruleRepo, recordRepo, domainRepo, sched, aiMgr)
 	logHandler := NewLogHandler()
+	assetHandler := NewAssetHandler(engine)
+
+	// 自主智能体（多轮工具调用 + 自主规划）：若调用方未注入则按需构建
+	if agentMgr == nil && aiMgr != nil && engine != nil && sched != nil {
+		agentMgr = agent.NewManager(&cfg.Agent, aiMgr, store, engine, sched)
+	}
+	agentHandler := NewAgentHandler(agentMgr)
 
 	// 公开认证接口（无需登录）
 	pub := router.Group("/api/auth")
@@ -98,7 +109,10 @@ func NewServerWithEngine(cfg *config.Config, store *storage.Neo4jStore, engine *
 		scan := protected.Group("/scan")
 		{
 			scan.POST("/start", scanHandler.StartScan)
+			// 规则列表（必须在 /:id 之前注册，避免路由冲突）
+			scan.GET("/rules", scanHandler.ListRules)
 			scan.GET("/:id/results", scanHandler.GetScanResults)
+			scan.GET("/:id/report", scanHandler.GetReport)
 			scan.GET("/:id/status", scanHandler.GetScanStatus)
 			scan.GET("/:id/progress", scanHandler.GetScanProgress)
 			scan.GET("/:id/logs", scanHandler.GetScanLogs)
@@ -118,6 +132,7 @@ func NewServerWithEngine(cfg *config.Config, store *storage.Neo4jStore, engine *
 		{
 			admin.GET("/users", authHandler.ListUsers)
 			admin.PATCH("/users/:id/role", authHandler.UpdateRole)
+			admin.PATCH("/users/:id/password", authHandler.ChangePassword)
 			admin.DELETE("/users/:id", authHandler.DeleteUser)
 			// 切换默认大模型 / 调用策略
 			admin.PUT("/ai/default", aiHandler.SetDefault)
@@ -165,6 +180,26 @@ func NewServerWithEngine(cfg *config.Config, store *storage.Neo4jStore, engine *
 			aimodels.POST("/chat/stream", aiHandler.Stream)
 			aimodels.POST("/compare", aiHandler.Compare)
 			aimodels.POST("/providers/:name/test", aiHandler.TestProvider)
+		}
+
+		// 网络资产：暴露面扫描 + 拓扑结构图
+		assets := protected.Group("/assets")
+		{
+			assets.POST("/scan/:domain_id", assetHandler.ScanAssets)
+			assets.GET("/graph/:domain_id", assetHandler.GetAssetGraph)
+			assets.GET("/list/:domain_id", assetHandler.ListAssets)
+		}
+
+		// 自主智能体：多轮工具调用 + 自主规划（连接平台数据库并执行复杂多步骤任务）
+		// 权限：操作员(role_level>=1)及以上，因为智能体会对平台执行扫描/建单等动作。
+		agents := protected.Group("/agent")
+		agents.Use(RequireRoleLevel(models.RoleLevelScanner))
+		{
+			agents.POST("/run", agentHandler.Run)
+			agents.GET("/tasks", agentHandler.ListTasks)
+			agents.GET("/tasks/:id", agentHandler.GetTask)
+			agents.POST("/tasks/:id/stop", agentHandler.StopTask)
+			agents.GET("/tools", agentHandler.ListTools)
 		}
 	}
 
@@ -223,8 +258,37 @@ type Server struct {
 	cfg    *config.Config
 }
 
+// Run 启动 HTTP 服务。
+//
+// 跨平台说明：端口被占用在 Windows（如被残留进程/IIS/Skype 占用）与 Linux
+// （如被旧实例或容器占用）上都会发生，而 Gin 默认只输出一句 "listen tcp ...:
+// address already in use"。这里先做一次预检，把错误翻译成可操作的中文提示，
+// 并给出 Windows 与 Linux 两种排查命令，避免部署时误判为程序崩溃。
 func (s *Server) Run() error {
-	return s.router.Run(s.cfg.GetServerAddr())
+	addr := s.cfg.GetServerAddr()
+
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("无法监听 %s：%w\n"+
+			"  可能原因：端口已被其他进程占用，或当前用户无权限绑定该端口（Linux 下 <1024 需 root）。\n"+
+			"  排查命令：\n"+
+			"    Windows: netstat -ano | findstr :%s  （随后 taskkill /F /PID <pid>）\n"+
+			"    Linux  : ss -lntp | grep ':%s'  或 lsof -i :%s  （随后 kill -9 <pid>）\n"+
+			"  也可通过配置文件 server.port 改用其它端口。",
+			addr, err, portOf(addr), portOf(addr), portOf(addr))
+	}
+	// 预检通过后关闭探测监听，交给 Gin 正式监听（二者之间窗口极小，仅用于给出友好报错）
+	_ = ln.Close()
+
+	return s.router.Run(addr)
+}
+
+// portOf 从监听地址中取出端口部分，用于错误信息提示。
+func portOf(addr string) string {
+	if _, port, err := net.SplitHostPort(addr); err == nil {
+		return port
+	}
+	return addr
 }
 
 // corsMiddleware 跨域支持。
