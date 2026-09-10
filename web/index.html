@@ -985,11 +985,17 @@
             <div class="card">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
                     <div class="card-title" style="margin:0;">工单列表</div>
-                    <button class="btn btn-primary" onclick="showAddTicketModal()">+ 创建工单</button>
+                    <div style="display:flex;gap:10px;align-items:center;">
+                        <span id="ticketSelectionHint" style="font-size:13px;color:#94a3b8;"></span>
+                        <button id="batchDeleteTicketsBtn" class="btn" style="background:#dc2626;display:none;" onclick="batchDeleteTickets()">批量删除</button>
+                        <button id="mergeTicketsBtn" class="btn" style="background:#7c3aed;display:none;" onclick="showMergeTicketsModal()">批量合并</button>
+                        <button class="btn btn-primary" onclick="showAddTicketModal()">+ 创建工单</button>
+                    </div>
                 </div>
                 <table class="table">
                     <thead>
                         <tr>
+                            <th style="width:40px;"><input type="checkbox" id="selectAllTickets" onchange="toggleSelectAllTickets(this)"></th>
                             <th>工单ID</th>
                             <th>标题</th>
                             <th>关联漏洞</th>
@@ -1000,7 +1006,7 @@
                         </tr>
                     </thead>
                     <tbody id="ticketsBody">
-                        <tr><td colspan="7" style="text-align:center;color:#64748b;">暂无数据</td></tr>
+                        <tr><td colspan="8" style="text-align:center;color:#64748b;">暂无数据</td></tr>
                     </tbody>
                 </table>
                 <div id="ticketsPagination" class="pagination-bar"></div>
@@ -1310,6 +1316,29 @@
         </div>
     </div>
 
+    <!-- Merge Tickets Modal -->
+    <div class="modal-overlay" id="mergeTicketsModal">
+        <div class="modal" style="width:480px;">
+            <div class="modal-header">
+                <div class="modal-title">合并工单</div>
+                <button class="modal-close" onclick="closeMergeModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="color:#94a3b8;margin-bottom:16px;">将 <strong id="mergeTicketCount">0</strong> 个工单合并为一个新工单。</p>
+                <input type="hidden" id="mergeTicketIds">
+                <div class="form-group">
+                    <label class="form-label">新工单标题（可选）</label>
+                    <input type="text" class="form-input" id="mergeTargetTitle" placeholder="留空则自动生成">
+                </div>
+                <p style="color:#94a3b8;font-size:12px;margin-top:12px;">合并后，所有源工单的描述和备注将被汇总到新工单中，源工单将被删除。</p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeMergeModal()">取消</button>
+                <button class="btn btn-primary" onclick="mergeTickets()">确认合并</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Change Role Modal -->
     <div class="modal-overlay" id="changeRoleModal">
         <div class="modal" style="width:420px;">
@@ -1495,8 +1524,8 @@
         //   - 页面跑在预览面板/其他端口 → 自动回退到 http://localhost:8080
         //   - file:// 直接打开 → 直接使用默认地址
         // ============================================================
-        const DEFAULT_API_HOST = 'http://localhost:8080';
-        const FALLBACK_API_HOSTS = ['http://localhost:8080', 'http://127.0.0.1:8080'];
+        const DEFAULT_API_HOST = 'http://localhost:8030';
+        const FALLBACK_API_HOSTS = ['http://localhost:8030', 'http://127.0.0.1:8030'];
         const REQUEST_TIMEOUT_MS = 15000;
         // 生成式 AI 推理较慢（DeepSeek 快，Kimi/GLM 单次常需 15~60s），单独放宽超时，
         // 避免前端在模型返回前误判为“超时”。后端单家 provider 上限 60s + 重试。
@@ -2419,13 +2448,14 @@
             const tbody = document.getElementById('ticketsBody');
             if (!tbody) return;
             if (allTicketsCache.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#64748b;">暂无数据</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#64748b;">暂无数据</td></tr>';
                 renderPaginationBar('ticketsPagination', ticketsPaginationState, { total: 0, totalPages: 1 }, renderTickets);
                 return;
             }
             const paged = sliceForPaging(allTicketsCache, ticketsPaginationState);
             tbody.innerHTML = paged.slice.map(t => `
                 <tr>
+                    <td><input type="checkbox" class="ticket-checkbox" value="${t.id}" onchange="updateTicketSelectionUI()"></td>
                     <td><code style="background:#0f172a;padding:2px 6px;border-radius:4px;">${t.id.substring(0, 8)}...</code></td>
                     <td>${t.title || (t.vuln_id ? ('漏洞工单 ' + t.vuln_id.substring(0, 8)) : '工单')}</td>
                     <td>${t.vuln_id || '-'}</td>
@@ -2434,10 +2464,119 @@
                     <td>${formatDate(t.created_at)}</td>
                     <td>
                         <button class="btn btn-primary" style="padding:4px 8px;font-size:12px;" onclick="showTicketDetail('${t.id}')">详情</button>
+                        ${userRoleLevel >= 3 ? `<button class="btn" style="padding:4px 8px;font-size:12px;background:#dc2626;margin-left:4px;" onclick="deleteTicket('${t.id}')">删除</button>` : ''}
                     </td>
                 </tr>
             `).join('');
             renderPaginationBar('ticketsPagination', ticketsPaginationState, paged, renderTickets);
+            updateTicketSelectionUI();
+        }
+
+        // ============ 工单选择相关 ============
+        let selectedTicketIds = new Set();
+
+        function toggleSelectAllTickets(checkbox) {
+            const checkboxes = document.querySelectorAll('.ticket-checkbox');
+            if (checkbox.checked) {
+                checkboxes.forEach(cb => cb.checked = true);
+                allTicketsCache.forEach(t => selectedTicketIds.add(t.id));
+            } else {
+                checkboxes.forEach(cb => cb.checked = false);
+                selectedTicketIds.clear();
+            }
+            updateTicketSelectionUI();
+        }
+
+        function updateTicketSelectionUI() {
+            const checkboxes = document.querySelectorAll('.ticket-checkbox');
+            selectedTicketIds.clear();
+            checkboxes.forEach(cb => {
+                if (cb.checked) selectedTicketIds.add(cb.value);
+            });
+
+            const count = selectedTicketIds.size;
+            const hint = document.getElementById('ticketSelectionHint');
+            const batchDeleteBtn = document.getElementById('batchDeleteTicketsBtn');
+            const mergeBtn = document.getElementById('mergeTicketsBtn');
+
+            if (hint) {
+                hint.textContent = count > 0 ? `已选择 ${count} 个工单` : '';
+            }
+            if (batchDeleteBtn) {
+                batchDeleteBtn.style.display = count > 0 ? 'inline-block' : 'none';
+            }
+            if (mergeBtn) {
+                mergeBtn.style.display = count >= 2 ? 'inline-block' : 'none';
+            }
+        }
+
+        // 删除单个工单
+        async function deleteTicket(id) {
+            if (!confirm('确定要删除这个工单吗？')) return;
+            const result = await fetchAPI(`/tickets/${id}`, { method: 'DELETE' });
+            if (result) {
+                showToast('工单已删除');
+                loadTickets();
+            }
+        }
+
+        // 批量删除工单
+        async function batchDeleteTickets() {
+            const ids = Array.from(selectedTicketIds);
+            if (ids.length === 0) {
+                showToast('请选择要删除的工单');
+                return;
+            }
+            if (!confirm(`确定要删除选中的 ${ids.length} 个工单吗？`)) return;
+
+            const result = await fetchAPI('/tickets/batch-delete', {
+                method: 'POST',
+                body: JSON.stringify({ ids: ids })
+            });
+            if (result) {
+                showToast(result.message || '工单已删除');
+                selectedTicketIds.clear();
+                loadTickets();
+            }
+        }
+
+        // 显示合并工单弹窗
+        function showMergeTicketsModal() {
+            const ids = Array.from(selectedTicketIds);
+            if (ids.length < 2) {
+                showToast('合并至少需要2个工单');
+                return;
+            }
+            document.getElementById('mergeTicketCount').textContent = ids.length;
+            document.getElementById('mergeTargetTitle').value = '';
+            document.getElementById('mergeTicketIds').value = ids.join(',');
+            document.getElementById('mergeTicketsModal').classList.add('active');
+        }
+
+        function closeMergeModal() {
+            document.getElementById('mergeTicketsModal').classList.remove('active');
+        }
+
+        async function mergeTickets() {
+            const idsStr = document.getElementById('mergeTicketIds').value;
+            const targetTitle = document.getElementById('mergeTargetTitle').value.trim();
+            const ids = idsStr.split(',').filter(id => id.trim() !== '');
+
+            if (ids.length < 2) {
+                showToast('合并至少需要2个工单');
+                return;
+            }
+
+            const result = await fetchAPI('/tickets/merge', {
+                method: 'POST',
+                body: JSON.stringify({ source_ids: ids, target_title: targetTitle })
+            });
+            if (result) {
+                showToast(result.message || '工单已合并');
+                closeMergeModal();
+                selectedTicketIds.clear();
+                loadTickets();
+            }
         }
         
         // ============ AI 多模型（DeepSeek / Kimi / GLM） ============
@@ -2735,6 +2874,12 @@
 
                 ${ticket.notes ? section('备注', v(ticket.notes)) : ''}
 
+                ${userRoleLevel >= 3 ? `
+                    <div style="margin-top:20px;padding-top:16px;border-top:1px solid #334155;">
+                        <button class="btn" style="background:#dc2626;" onclick="deleteTicketFromDetail('${id}')">删除此工单</button>
+                    </div>
+                ` : ''}
+
                 ${userRoleLevel >= 1 ? `
                     <div style="margin-top:16px;">
                         <label class="form-label">更新状态</label>
@@ -2758,6 +2903,17 @@
             document.getElementById('ticketDetailModal').classList.add('active');
         }
         
+        // 从详情弹窗删除工单
+        async function deleteTicketFromDetail(id) {
+            if (!confirm('确定要删除这个工单吗？')) return;
+            const result = await fetchAPI(`/tickets/${id}`, { method: 'DELETE' });
+            if (result) {
+                showToast('工单已删除');
+                document.getElementById('ticketDetailModal').classList.remove('active');
+                loadTickets();
+            }
+        }
+
         // Update ticket status
         async function updateTicketStatus(id) {
             const status = document.getElementById('ticketStatusSelect').value;

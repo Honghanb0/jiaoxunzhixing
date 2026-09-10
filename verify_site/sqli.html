@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>SQL 注入测试页</title></head>
+<body>
+<h1>SQL 注入测试页</h1>
+<p>本页由带注入参数的 URL 访问时，扫描器应基于 URL 命中 SQLi 特征。</p>
+
+<!-- 表单 action 也携带注入特征，作为补充 -->
+<form action="/sqli.html?id=1' OR '1'='1" method="GET">
+  <input type="text" name="q" value="1' DROP TABLE users--">
+  <button type="submit">查询</button>
+</form>
+
+<p><a href="/index.html">返回首页</a></p>
+</body>
+</html>

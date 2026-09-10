@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 	"time"
@@ -48,6 +47,9 @@ func NewManager(cfg *config.AgentConfig, aiMgr *ai.Manager, store *storage.Neo4j
 		ScanJobRepo: storage.NewScanJobRepository(store),
 		TaskRepo:    newTaskRepo(store),
 	}
+	// 注入列表查询函数（缺省回退到 Neo4j 查询）；便于单测替换为内存桩数据。
+	deps.VulnLister = func(did string, limit int) (string, error) { return deps.listVulnerabilities(did, "", limit) }
+	deps.SensLister = func(did string, limit int) (string, error) { return deps.listSensitiveInfo(did, limit) }
 	reg := NewToolRegistry()
 	RegisterBuiltinTools(reg, deps)
 
@@ -60,7 +62,7 @@ func NewManager(cfg *config.AgentConfig, aiMgr *ai.Manager, store *storage.Neo4j
 		cfg:      cfg,
 		registry: reg,
 		repo:     repo,
-		agent:    NewAgent(aiMgr, reg, repo, maxTurns),
+		agent:    NewAgent(aiMgr, reg, repo, deps, maxTurns),
 		tasks:    map[string]*Task{},
 		cancels:  map[string]context.CancelFunc{},
 	}
@@ -102,11 +104,12 @@ func (m *Manager) Get(id string) (*Task, error) {
 	if t, ok := m.tasks[id]; ok {
 		snap := t.Snapshot()
 		m.mu.Unlock()
-		log.Printf("[Agent][Manager.Get] 命中内存实时快照 id=%s status=%s", id, snap.Status)
+		// 注意：此处前端会按秒级轮询（3s/次），绝不能无条件打日志——
+		// 高频日志会淹没日志通道/管道，曾导致 stdout 被采集时写满阻塞、
+		// 进而使所有调用 log 的 HTTP 处理器挂死（任务详情接口 15s 超时）。
 		return snap, nil
 	}
 	m.mu.Unlock()
-	log.Printf("[Agent][Manager.Get] 内存无快照，回退 Neo4j 持久层 id=%s", id)
 	return m.repo.Get(id)
 }
 

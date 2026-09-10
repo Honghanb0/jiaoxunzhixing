@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -26,6 +27,7 @@ type CreateTicketRequest struct {
 	ScanJobID   string `json:"scan_job_id,omitempty"`
 	Title       string `json:"title,omitempty"`
 	Type        string `json:"type,omitempty"`
+	RiskLevel   string `json:"risk_level,omitempty"`
 	Description string `json:"description,omitempty"`
 	Notes       string `json:"notes,omitempty"`
 }
@@ -37,6 +39,15 @@ type UpdateTicketRequest struct {
 
 type AddNoteRequest struct {
 	Note string `json:"note" binding:"required"`
+}
+
+type DeleteBatchRequest struct {
+	IDs []string `json:"ids" binding:"required,min=1"`
+}
+
+type MergeTicketsRequest struct {
+	SourceIDs   []string `json:"source_ids" binding:"required,min=2"`
+	TargetTitle string   `json:"target_title"`
 }
 
 // Create 创建工单
@@ -76,9 +87,12 @@ func (h *TicketHandler) Create(c *gin.Context) {
 		Status:    models.TicketStatusPending,
 		Type:      req.Type,
 		Title:     req.Title,
+		// risk_level 优先取调用方显式传入（智能体 create_ticket 会带 high/medium/low）；
+		// 若未传则留空，待下方「关联漏洞」或「triageFromRisk」环节自动补全，保持向后兼容。
+		RiskLevel:   req.RiskLevel,
 		Description: req.Description,
-		Notes:     req.Notes,
-		CreatorID: CurrentUserID(c),
+		Notes:       req.Notes,
+		CreatorID:   CurrentUserID(c),
 	}
 
 	// 从关联漏洞补全展示字段；未提供则给基线研判
@@ -235,6 +249,85 @@ func (h *TicketHandler) AddNote(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message": "备注添加成功",
 		"ticket": ticket,
+	})
+}
+
+// Delete 删除工单
+func (h *TicketHandler) Delete(c *gin.Context) {
+	roleLevel := GetRoleLevelFromContext(c)
+	if roleLevel < models.RoleLevelAdmin {
+		c.JSON(http.StatusForbidden, gin.H{"error": "权限不足，需要权限级别3"})
+		return
+	}
+
+	id := c.Param("id")
+	if err := h.ticketRepo.Delete(id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "删除工单失败: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "工单删除成功"})
+}
+
+// DeleteBatch 批量删除工单
+func (h *TicketHandler) DeleteBatch(c *gin.Context) {
+	roleLevel := GetRoleLevelFromContext(c)
+	if roleLevel < models.RoleLevelAdmin {
+		c.JSON(http.StatusForbidden, gin.H{"error": "权限不足，需要权限级别3"})
+		return
+	}
+
+	var req DeleteBatchRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if len(req.IDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请选择要删除的工单"})
+		return
+	}
+
+	deleted, err := h.ticketRepo.DeleteBatch(req.IDs)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "批量删除工单失败: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": fmt.Sprintf("成功删除 %d 个工单", deleted),
+		"deleted": deleted,
+	})
+}
+
+// Merge 批量合并工单（将多个工单合并为一个）
+func (h *TicketHandler) Merge(c *gin.Context) {
+	roleLevel := GetRoleLevelFromContext(c)
+	if roleLevel < models.RoleLevelAdmin {
+		c.JSON(http.StatusForbidden, gin.H{"error": "权限不足，需要权限级别3"})
+		return
+	}
+
+	var req MergeTicketsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if len(req.SourceIDs) < 2 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "合并至少需要2个工单"})
+		return
+	}
+
+	result, err := h.ticketRepo.MergeTickets(req.SourceIDs, req.TargetTitle)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "合并工单失败: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": fmt.Sprintf("成功合并 %d 个工单为新工单", len(req.SourceIDs)),
+		"ticket":  result,
 	})
 }
 

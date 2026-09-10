@@ -1,83 +1,57 @@
-# ========== 构建产物 ==========
-bin/
+# ============================================================
+# 安全巡检自主智能体 (security-agent) —— .gitignore
+# 适用于 Go + Gin + Neo4j 项目。提交前请确认：
+#   - 含密钥/口令的配置文件已被忽略（仅提交 config.yaml.example 等样例）
+#   - 编译产物、日志、本地数据不会进入版本库
+# ============================================================
+
+# ---------------- Go 编译产物 / 二进制 ----------------
 *.exe
 *.exe~
-security-agent
-sa_*.exe
-sa_v*.exe
-sa_ai.exe~
+*.dll
+*.so
+*.dylib
 *.test
 *.out
+*.cover
+*.err
+# 构建输出目录（go build -o ./bin/security-agent 会重新生成）
+bin/
 
-# ========== 运行时日志 ==========
-logs/
-*.log
-run.log
-run.err.log
-server.log
-server_run.log
-server_verify.log
-neo4j_console.log
-sa_ai.log
-sa_v3_run.log
-sa_v3_run.err
-verify_out.log
-
-# ========== Electron 桌面应用构建产物（wanpinglingtan / wanpingqiuzhen）==========
-wanpinglingtan/dist/
-wanpinglingtan/dist_bak/
-wanpinglingtan/.electron-tmp/
-wanpinglingtan/_build.log
-wanpinglingtan/node_modules/
-wanpingqiuzhen/node_modules/
-
-# ========== Python ==========
-__pycache__/
-*.pyc
-
-# ========== 配置与密钥（含真实凭据，勿入库）==========
+# ---------------- 含密钥的配置文件（禁止入库） ----------------
+# 真实配置含 Neo4j 口令、AI 供应商 Key、JWT 密钥等，绝不能提交。
+# 仅保留无密钥的样例（config.yaml.example）供他人参照。
 config.yaml
-config.test.yaml
-config.8099.yaml
-config.mock.yaml
-.env
-token.txt
-hengnao_brief_report.txt
+config.*.yaml
+# 恒脑等第三方密钥明文文件（如 hengnao/参数.txt）
+hengnao/参数.txt
 
-# ========== 数据库数据 ==========
-data/
+# ---------------- 日志 ----------------
+*.log
+logs/
 
-# ========== IDE / OS ==========
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
+# ---------------- 本地运行数据 / 临时产物 ----------------
+# 登录令牌、扫描基线、原始请求包、运行错误输出等
+login.json
+baseline_*.json
+request.txt
+server_run.log
+server_8030.log
+range_8099.log
+neo4j_console.log
+
+# ---------------- 弱口令词表等本地数据 ----------------
+passwd_pwn/
+
+# ---------------- 项目记忆（可能含敏感信息） ----------------
+.workbuddy/
+
+# ---------------- 操作系统 / 编辑器垃圾 ----------------
 .DS_Store
 Thumbs.db
-
-# ========== 临时 / 一次性验证脚本（不入库）==========
-# 说明：下列脚本均为本地调试、验证、基准测试用的独立脚本，
-# 不属于平台源码，无需推送至 GitHub。
-_t_*
-check_*.js
-check_*.py
-insp_*.js
-insp_*.py
-verify_*.js
-verify_*.py
-verify_inspection.py
-verify_total_pages.py
-verify_vuln_detection.py
-gen_fingerprints.py
-replay.js
-_inject_logo.py
-request.txt
-verify_site/
-sa_*.exe
-sa_v*.exe
-sa_ai.exe~
-.after_scan.ps1
-.baseline_scan.ps1
-baseline_before.json
-baseline_after.json
+ehthumbs.db
+Desktop.ini
+*.swp
+*~
+.idea/
+.vscode/

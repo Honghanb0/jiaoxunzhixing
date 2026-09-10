@@ -312,9 +312,19 @@ func (e *Engine) runScan(scanCtx context.Context, scanJob *models.ScanJob, domai
 		startURL = "https://" + startURL
 	}
 
+	// 未显式设置 MaxDepth/MaxPages（值为 0）时回退到配置默认，
+	// 避免被当成“硬上限 0”而整站不爬（历史坑：建域名未传这两个字段则爬取 0 页）。
+	md := domain.MaxDepth
+	if md <= 0 {
+		md = e.cfg.Scanner.MaxDepth
+	}
+	mp := domain.MaxPages
+	if mp <= 0 {
+		mp = e.cfg.Scanner.MaxPages
+	}
 	crawlCtx := &CrawlContext{
 		Ctx:       scanCtx, // 外部可取消（超时 / 用户中止）
-		Domain:    &Domain{ID: domain.ID, Name: domain.Name, MaxDepth: domain.MaxDepth, MaxPages: domain.MaxPages, Concurrency: e.cfg.Scanner.Concurrency},
+		Domain:    &Domain{ID: domain.ID, Name: domain.Name, MaxDepth: md, MaxPages: mp, Concurrency: e.cfg.Scanner.Concurrency},
 		StartURL:  startURL,
 		Pages:     make([]*PageInfo, 0),
 		PageCount: 0,
@@ -374,6 +384,8 @@ func (e *Engine) runScan(scanCtx context.Context, scanJob *models.ScanJob, domai
 		for _, s := range pageSensitive {
 			s.ScanJobID = scanJob.ID
 			s.PageID = page.ID
+			// 补齐归属域名：敏感信息需能按域名检索（与漏洞一致），否则按域名查询恒为空。
+			s.DomainID = domain.ID
 			e.sensitiveRepo.Create(s)
 			sensitiveInfos = append(sensitiveInfos, s)
 		}

@@ -71,6 +71,75 @@ func cleanupTask(t *testing.T, store *storage.Neo4jStore, id string) {
 	}
 }
 
+// TestTaskRepoContractRoundTrip 固化「交付契约写入 task 元信息并回读」行为：
+// 任务启动时 parseContractIntent 解析出的 DeliverableContract 必须随任务持久化到 Neo4j，
+// 进程重启 / 通过 Get 回看时仍能完整还原，使机器校验交付物有据可依（而非只在内存中存在）。
+func TestTaskRepoContractRoundTrip(t *testing.T) {
+	store := openTestStore(t)
+	repo := newTaskRepo(store)
+
+	now := time.Now()
+	tk := &Task{
+		Goal:      "对127.0.0.1:8099扫描，重点排查弱口令和数据泄露，务必提交相关工单，每天16:00日常巡检",
+		Status:    TaskStatusRunning,
+		CreatedAt: now,
+		UpdatedAt: now,
+		Contract: &DeliverableContract{
+			NeedsTicket:      true,
+			TicketCategories: []string{catWeakPassword, catDataLeak},
+			NeedsRule:        true,
+			Schedule:         "0 16 * * *",
+			TargetHost:       "127.0.0.1:8099",
+			TargetDomains:    []string{"884e1363-0000-0000-0000-000000000001"},
+		},
+	}
+	if err := repo.Create(tk); err != nil {
+		t.Fatalf("Create 失败: %v", err)
+	}
+	defer cleanupTask(t, store, tk.ID)
+
+	got, err := repo.Get(tk.ID)
+	if err != nil {
+		t.Fatalf("带契约任务 Get 失败: %v", err)
+	}
+	if got.Contract == nil {
+		t.Fatalf("回读后 Contract 为 nil（契约未持久化）")
+	}
+	c := got.Contract
+	if !c.NeedsTicket {
+		t.Errorf("NeedsTicket 丢失")
+	}
+	if !c.NeedsRule {
+		t.Errorf("NeedsRule 丢失")
+	}
+	if c.Schedule != "0 16 * * *" {
+		t.Errorf("Schedule 丢失/错乱: got=%q", c.Schedule)
+	}
+	if c.TargetHost != "127.0.0.1:8099" {
+		t.Errorf("TargetHost 丢失/错乱: got=%q", c.TargetHost)
+	}
+	if len(c.TicketCategories) != 2 || !sliceContains(c.TicketCategories, catWeakPassword) || !sliceContains(c.TicketCategories, catDataLeak) {
+		t.Errorf("TicketCategories 丢失/错乱: %v", c.TicketCategories)
+	}
+	if len(c.TargetDomains) != 1 || c.TargetDomains[0] != "884e1363-0000-0000-0000-000000000001" {
+		t.Errorf("TargetDomains 丢失/错乱: %v", c.TargetDomains)
+	}
+
+	// Update 路径同样应保留契约（防止后续 Update 把 contract 字段清空）。
+	c.TicketCategories = []string{catWeakPassword}
+	tk.Contract = c
+	if err := repo.Update(tk); err != nil {
+		t.Fatalf("Update 失败: %v", err)
+	}
+	got2, err := repo.Get(tk.ID)
+	if err != nil {
+		t.Fatalf("Update 后 Get 失败: %v", err)
+	}
+	if got2.Contract == nil || len(got2.Contract.TicketCategories) != 1 {
+		t.Fatalf("Update 后契约类别未保留: %+v", got2.Contract)
+	}
+}
+
 // TestTaskRepoGet_NoSteps_Regression 是本次 404 bug 的核心回归点：
 // 创建「没有任何执行步骤」的任务，Get 必须成功返回且 steps 为空，绝不能 404。
 func TestTaskRepoGet_NoSteps_Regression(t *testing.T) {

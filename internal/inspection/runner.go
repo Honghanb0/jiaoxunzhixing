@@ -72,12 +72,20 @@ func (r *Runner) Run(rule *models.InspectionRule, triggeredBy string) string {
 		return rec.ID
 	}
 	var firstID string
+	// 限制单条多资产规则的最大并发巡检数，避免瞬时大量并发扫描/AI 调用拖垮
+	// Neo4j 连接池（默认 50）或触发 AI 供应商限流。
+	const maxConcurrentInspections = 3
+	sem := make(chan struct{}, maxConcurrentInspections)
 	for _, did := range domainIDs {
 		rec := r.prepareForDomain(rule, did, triggeredBy)
 		if firstID == "" {
 			firstID = rec.ID
 		}
-		go r.execute(rec, rule, did, triggeredBy)
+		sem <- struct{}{}
+		go func(rec *models.InspectionRecord, did string) {
+			defer func() { <-sem }()
+			r.execute(rec, rule, did, triggeredBy)
+		}(rec, did)
 	}
 	return firstID
 }

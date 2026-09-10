@@ -1,0 +1,117 @@
+id: "rule-webshell-detection"
+name: "WebShell Backdoor Detection"
+name_cn: "WebShell 后门检测"
+description: "检测服务端脚本（PHP/ASP/JSP 等）中常见的 WebShell 后门特征码，包括动态代码执行函数、加密混淆载荷、命令执行与反向连接等，识别服务器已被植入恶意脚本的风险"
+
+owasp_category: "A03-injection"
+owasp_subcategory: "Code Injection / Malicious Code"
+cwe_id: "CWE-94"
+
+cvss:
+  vector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+  base_score: 9.8
+  severity: "critical"
+
+detection:
+  methods: ["DAST", "SAST"]
+  dast_signals:
+    high_specificity:
+      - type: "php_webshell_eval"
+        pattern: "(eval\\s*\\(\\s*(base64_decode|gzinflate|str_rot13|gzuncompress|\\$_)|@eval\\s*\\(|assert\\s*\\(\\s*\\$_)"
+        confidence: 0.95
+      - type: "php_command_exec_with_input"
+        pattern: "(system\\s*\\(|exec\\s*\\(|shell_exec\\s*\\(|passthru\\s*\\(|proc_open\\s*\\(|popen\\s*\\(|pcntl_exec\\s*\\()\\s*[^;]*(\\$_(POST|GET|REQUEST|COOKIE))"
+        confidence: 0.95
+      - type: "asp_webshell"
+        pattern: "(<%.*?eval\\s*\\(|ExecuteGlobal|CreateObject\\s*\\(\\s*[\"']WScript\\.Shell|Response\\.Write\\s*CreateObject)"
+        confidence: 0.95
+      - type: "jsp_webshell"
+        pattern: "(Runtime\\.getRuntime\\(\\)\\.exec\\s*\\(|ProcessBuilder\\s*\\(|<%@\\s*page\\s+import=[\"']java\\.lang)"
+        confidence: 0.92
+      - type: "encoded_payload"
+        pattern: "(base64_decode\\s*\\(\\s*[\"'][A-Za-z0-9+/=]{40,}|gzinflate\\s*\\(|eval\\s*\\(\\s*base64)"
+        confidence: 0.93
+    medium_specificity:
+      - type: "dynamic_code_exec"
+        pattern: "(eval\\s*\\(|assert\\s*\\(|call_user_func\\s*\\(|array_map\\s*\\(|create_function\\s*\\(|preg_replace\\s*\\([^)]*\\/e)"
+        confidence: 0.75
+      - type: "suspicious_crypto"
+        pattern: "(base64_decode|str_rot13|gzinflate|gzuncompress|mcrypt_|openssl_decrypt)"
+        confidence: 0.70
+      - type: "cmd_string"
+        pattern: "(cmd\\.exe|/bin/sh\\s+-c|powershell\\s+-enc|/bin/bash\\s+-c)"
+        confidence: 0.70
+    low_specificity:
+      - type: "http_method_var"
+        pattern: "(\\$_(POST|GET|REQUEST|COOKIE))"
+        confidence: 0.30
+  sast_patterns:
+    - language: "php"
+      pattern: "(eval\\s*\\(.*\\$_|@eval\\s*\\(|assert\\s*\\(\\s*\\$_(POST|GET|REQUEST)|base64_decode\\s*\\(\\s*\\$_)"
+      confidence: 0.90
+    - language: "jsp"
+      pattern: "(Runtime\\.getRuntime\\(\\)\\.exec\\(|ProcessBuilder\\()"
+      confidence: 0.85
+    - language: "asp"
+      pattern: "(ExecuteGlobal|eval\\s*\\()"
+      confidence: 0.85
+  multi_layer:
+    enabled: true
+    min_signals: 2
+    high_specificity_skips_min: true
+  false_positive_filters:
+    - filter: "status_code"
+      condition: "status_code != 200"
+      action: "discard"
+    - filter: "empty_content"
+      condition: "content_length == 0 AND is_html"
+      action: "discard"
+    - filter: "legit_framework_source"
+      condition: "content_matches_known_framework_source"
+      action: "downgrade"
+      target_confidence: "low"
+
+poc:
+  enabled: true
+  request_template: |
+    GET {{url}}/{{webshell_path}} HTTP/1.1
+    Host: {{host}}
+    User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)
+    Accept: */*
+    Connection: close
+  payloads:
+    - name: "eval_post"
+      value: "eval.php"
+      description: "eval($_POST[...]) 类型 PHP WebShell"
+      risk: "critical"
+    - name: "assert_get"
+      value: "assert.php"
+      description: "assert($_GET[...]) 类型 WebShell"
+      risk: "critical"
+    - name: "command_exec"
+      value: "cmd.php"
+      description: "system/exec 命令执行后门"
+      risk: "critical"
+  verification:
+    - type: "content_check"
+      pattern: "eval|system|assert|base64_decode"
+      description: "响应内容包含 WebShell 特征码"
+    - type: "behavior_check"
+      description: "通过参数注入探针验证是否可执行命令"
+
+remediation:
+  priority: "P0"
+  summary: "立即隔离并清除 WebShell 文件，排查入侵路径并修复上传/解析漏洞"
+  details:
+    - "从可信备份恢复被篡改的文件，或直接删除确认的 WebShell"
+    - "排查上传功能、文件解析漏洞（如 .htaccess 解析、IIS 解析）、弱口令等入侵入口"
+    - "检查定时任务、启动项、账号与后门留存"
+    - "部署 WAF/文件完整性监控（FIM）检测异常脚本新增"
+    - "对上传目录禁止脚本执行权限"
+  references:
+    - "https://owasp.org/Top10/A03_2021-Injection/"
+    - "https://cwe.mitre.org/data/definitions/94.html"
+
+knowledge_source:
+  file: "知识库/webshell-detection.md"
+  methodology: "src-value-hunting.md §3 RCE/代码执行链"

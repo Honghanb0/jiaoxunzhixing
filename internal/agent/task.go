@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"sort"
@@ -19,6 +20,19 @@ type taskRepo struct {
 
 func newTaskRepo(store *storage.Neo4jStore) *taskRepo { return &taskRepo{store: store} }
 
+// marshalContract 把交付契约序列化为可入库的 JSON 字符串；nil 或空契约返回空串。
+func marshalContract(c *DeliverableContract) string {
+	if c == nil {
+		return ""
+	}
+	b, err := json.Marshal(c)
+	if err != nil {
+		log.Printf("[Agent][taskRepo] 契约序列化失败 err=%v", err)
+		return ""
+	}
+	return string(b)
+}
+
 func (r *taskRepo) Create(t *Task) error {
 	if t.ID == "" {
 		t.ID = uuid.New().String()
@@ -28,12 +42,14 @@ func (r *taskRepo) Create(t *Task) error {
 	}
 	t.UpdatedAt = time.Now()
 	query := `CREATE (t:AgentTask {id:$id, goal:$goal, status:$status, provider:$provider, model:$model,
-		result:$result, error:$error, turns:0, created_at:datetime($created_at), updated_at:datetime($updated_at)})`
+		result:$result, error:$error, turns:0, contract:$contract,
+		created_at:datetime($created_at), updated_at:datetime($updated_at)})`
 	session := r.store.Session()
 	defer session.Close()
 	_, err := session.Run(query, map[string]any{
 		"id": t.ID, "goal": t.Goal, "status": string(t.Status),
 		"provider": t.Provider, "model": t.Model, "result": t.Result, "error": t.Error,
+		"contract": marshalContract(t.Contract),
 		"created_at": t.CreatedAt.Format(time.RFC3339), "updated_at": t.UpdatedAt.Format(time.RFC3339),
 	})
 	return err
@@ -43,13 +59,15 @@ func (r *taskRepo) Update(t *Task) error {
 	t.UpdatedAt = time.Now()
 	query := `MATCH (t:AgentTask {id:$id})
 		SET t.status=$status, t.result=$result, t.error=$error, t.turns=$turns, t.model=$model,
+		    t.contract=$contract,
 		    t.updated_at=datetime($updated_at),
 		    t.completed_at=CASE WHEN $completed_at IS NULL THEN NULL ELSE datetime($completed_at) END`
 	session := r.store.Session()
 	defer session.Close()
 	_, err := session.Run(query, map[string]any{
 		"id": t.ID, "status": string(t.Status), "result": t.Result, "error": t.Error,
-		"turns": t.Turns, "model": t.Model, "updated_at": t.UpdatedAt.Format(time.RFC3339),
+		"turns": t.Turns, "model": t.Model, "contract": marshalContract(t.Contract),
+		"updated_at": t.UpdatedAt.Format(time.RFC3339),
 		"completed_at": nullableTime(t.CompletedAt),
 	})
 	return err
@@ -171,6 +189,15 @@ func nodeToTask(node neo4j.Node) *Task {
 	}
 	if ct := getTimeProp(p, "completed_at"); !ct.IsZero() {
 		t.CompletedAt = &ct
+	}
+	// 回读交付契约（任务启动时写入的元信息，机器据此校验交付物）。
+	if raw := getStr(p, "contract"); raw != "" {
+		var c DeliverableContract
+		if err := json.Unmarshal([]byte(raw), &c); err == nil {
+			t.Contract = &c
+		} else {
+			log.Printf("[Agent][nodeToTask] 契约反序列化失败 id=%s err=%v", t.ID, err)
+		}
 	}
 	return t
 }

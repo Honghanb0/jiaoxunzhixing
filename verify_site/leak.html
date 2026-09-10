@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>敏感文件泄露测试页</title></head>
+<body>
+<h1>敏感文件泄露测试页</h1>
+<p>以下链接指向常被误置于 Web 根目录的敏感文件，扫描器应基于 URL 识别。</p>
+<ul>
+  <li><a href="/.env">.env 环境变量文件</a></li>
+  <li><a href="/wp-config.php">wp-config.php</a></li>
+  <li><a href="/id_rsa">SSH 私钥 id_rsa</a></li>
+  <li><a href="/backup.sql">数据库备份 backup.sql</a></li>
+  <li><a href="/.htpasswd">.htpasswd</a></li>
+  <li><a href="/.git/config">.git/config</a></li>
+</ul>
+<p><a href="/index.html">返回首页</a></p>
+</body>
+</html>

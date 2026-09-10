@@ -30,7 +30,7 @@
 - **CLI 风格日志页**：终端风格（等宽、深色、按级别着色）实时查看服务端/前端日志，支持级别/关键字/时间过滤、暂停刷新；权限等级 ≥ 2 可见。
 - **多级权限控制**：4 级角色（访客/操作员/审计员/管理员），JWT 携带数值权限声明。
 - **用户自助注册**：登录页支持注册普通账号（默认访客/操作员级别，由管理员按需提权）。
-- **自主安全运维智能体（Agent）**：在现有多模型接入层之上，构建了支持「多轮工具调用 + 自主规划」的执行引擎（参考 earendil-works/pi 的双层调用循环）。Agent 可连接并分析本平台 Neo4j 数据库（统计/聚合/自定义 Cypher 推理），并直接驱动平台动作（发起扫描、等待结果、触发巡检、创建/更新/删除工单与告警、新建/删除巡检规则、延时/定时等待、读取近期任务复盘），具备任务拆解、状态跟踪与结果回写能力。近三十个内置工具覆盖定时扫描（`get_current_time` + `wait_until`）、一次性扫描清理（`delete_inspection_rule`）、历史任务复盘（`list_recent_tasks`）等场景，详见「九、自主智能体（Agent）」。
+- **自主安全运维智能体（Agent）**：在现有多模型接入层之上，构建了支持「多轮工具调用 + 自主规划」的执行引擎（参考 earendil-works/pi 的双层调用循环）。Agent 可连接并分析本平台 Neo4j 数据库（统计/聚合/自定义 Cypher 推理），并直接驱动平台动作（发起扫描、等待结果、触发巡检、创建/更新/删除工单与告警、新建/删除巡检规则、延时/定时等待、读取近期任务复盘），具备任务拆解、状态跟踪与结果回写能力。近三十个内置工具覆盖定时扫描（`get_current_time` + `wait_until`）、一次性扫描清理（`delete_inspection_rule`）、历史任务复盘（`list_recent_tasks`）、弱口令探测与验证（`weak_password_scan` / `verify_credentials` / `manage_password_dict`）等场景，详见「九、自主智能体（Agent）」。
 - **企业级漏洞发现引擎（vuln-engine）**：基于结构化 YAML 规则库（14 条 OWASP Top 10 全覆盖规则）驱动的规则引擎，实现 SAST/DAST/IAST 三种检测模式。采用三层特异性信号匹配（high/medium/low）+ 多层确认机制（≥2 信号命中才上报）+ 置信度评分（0.0-1.0）+ 误报过滤器 + URL/Type 去重，将误报率从 92.1% 降至 0%。内置 CVSS 3.1 评分器（8 指标向量解析）、PoC 自动生成器（HTTP 请求模板）、三格式报告生成（Markdown/JSON/HTML），并预留 nuclei/sqlmap/burp 框架集成与 Jira/Linear/GitHub 工单系统 Webhook 接口。详见「六、关键设计 §6.6」。
 - **网络资产发现与拓扑可视化**：参考 `wanpinglingtan` 集成专业的网络暴露面扫描工具，配置全面扫描策略（DNS 解析 + crt.sh 子域名枚举 + 并发 TCP 端口扫描 + 服务识别），自动发现并记录域名、子域名、IP、开放端口、应用服务等各类资产。利用 Neo4j 图数据库构建 Domain→Subdomain→IP→Port→Service 层级关联模型，参考 [scanopy](https://github.com/scanopy/scanopy) 基于 ReactFlow 实现直观的资产拓扑图，支持层级展开、搜索过滤、节点详情查看、缩略图导航。功能已合并至「域名管理」页面（Tab 切换）。详见「六、关键设计 §6.7」。
 
@@ -42,9 +42,11 @@
 
 | 组件 | 版本 | 说明 |
 |------|------|------|
-| Go | 1.21+ | 编译运行后端 |
+| Go | 1.21+ | 编译运行后端（**唯一必需运行时**，无需 Python） |
 | Neo4j | 4.4+ | 图数据库（存储域名、漏洞、工单、巡检记录） |
 | DeepSeek / Kimi / GLM API Key | — | AI 研判功能（可多供应商，OpenAI 兼容协议） |
+
+> **运行时说明**：项目已完全 Go 化，构建与全部运维脚本（`cmd/resetdb`、`cmd/genfingerprints`、`cmd/mockai`、`cmd/preflight`）均为 Go 实现，**不依赖 Python 3 / pip / venv**。仅本地漏洞靶场 `verify_site/`（3.5 节）可用 Python 标准库 `http.server` 临时承载，属一次性调试便利，非项目依赖。
 
 ### 3.2 安装与启动
 
@@ -56,7 +58,7 @@ go mod download
 #    database.neo4j.uri / username / password
 #    ai.provider / api_key / model / base_url
 
-# 3. 编译运行（默认读取同目录 config.yaml，监听 :8080）
+# 3. 编译运行（默认读取同目录 config.yaml，监听 :8030）
 go build -o ./bin/security-agent ./cmd/server
 ./bin/security-agent
 # 或指定配置：./bin/security-agent -config config.test.yaml
@@ -154,7 +156,9 @@ python -m http.server 8099 --bind 127.0.0.1 --directory verify_site
 | 漏洞 | GET | /api/vulnerabilities | 漏洞列表（含去重统计） | 认证 |
 | 统计 | GET | /api/stats | Dashboard 统计（去重数 + 累计命中） | 认证 |
 | 工单 | GET/POST | /api/tickets | 列表 / 创建 | 认证 / ≥1 |
-| 工单 | PATCH/POST | /api/tickets/:id(/notes) | 状态更新 / 备注 | ≥1 |
+| 工单 | PATCH/POST/DELETE | /api/tickets/:id(/notes) | 状态更新 / 备注 / 删除 | ≥1 |
+| 工单 | POST | /api/tickets/batch-delete | 批量删除 | ≥3 |
+| 工单 | POST | /api/tickets/merge | 批量合并 | ≥3 |
 | AI 模型 | GET/POST | /api/admin/ai(/default) | 模型列表 / 设默认 | ≥1 / ≥3 |
 | 巡检规则 | GET/POST | /api/inspections/rules | 规则列表 / 创建 | ≥1 |
 | 巡检规则 | POST | /api/inspections/rules/:id/run | 手动触发巡检 | ≥1 |
@@ -206,7 +210,7 @@ python -m http.server 8099 --bind 127.0.0.1 --directory verify_site
 | `taskRepo` | `task.go` | 任务持久化：`:AgentTask` 节点 + `:HAS_STEP->:AgentStep` 子节点写入 Neo4j，进程重启后仍可回看 |
 | `ContextManager` | `context.go` | 上下文管理：按 token 预算估算与压缩，保留 system + 首条目标 + 近期消息，防止上下文溢出 |
 | `Manager` | `manager.go` | 生命周期：构建依赖集合 `Deps`、注册工具、提交/查询/中止任务，持有运行中与已取消任务的上下文 |
-| `Deps` + 工具实现 | `tools.go` / `tools_action.go` | 平台依赖聚合与 25 个内置工具（只读分析 + 平台动作） |
+| `Deps` + 工具实现 | `tools.go` / `tools_action.go` / `tools_weakpass.go` | 平台依赖聚合与 30 个内置工具（只读分析 + 平台动作 + 弱口令探测） |
 
 #### 6.5.2 调用循环机制（双层循环）
 
@@ -415,7 +419,7 @@ remediation:
 ```yaml
 server:
   host: "0.0.0.0"
-  port: 8080
+  port: 8030
   mode: "release"
 database:
   neo4j:
@@ -464,7 +468,13 @@ agent:
 
 ```
 .
-├── cmd/server/main.go          # 入口：装配配置、存储、调度、路由、日志
+├── cmd/
+│   ├── server/         # 平台主服务入口：装配配置/存储/调度/路由/日志，监听 :8030
+│   ├── dbcheck/        # Neo4j 连通性自检（运维排障）
+│   ├── resetdb/        # 重置图库：清空域名/漏洞/工单/巡检/资产等节点（--confirm/--dry-run）
+│   ├── genfingerprints/ # 由 clown-src-6k-skill 指纹源生成 fingerprints.json（go:embed 用）
+│   ├── mockai/         # 本地 Mock AI 服务（/chat/completions，支持 JWT/静态 Key 鉴权 + SSE）
+│   └── preflight/      # 安全运维前置门禁：检查 rules/MCP/vuln-engine/知识库/产物目录等
 ├── internal/
 │   ├── api/                    # HTTP 层：server/handlers/scan_handler/inspection_handler/
 │   │                           #   ticket_handler/alert_handler/ai_handler/log_handler/
@@ -479,6 +489,7 @@ agent:
 │   ├── inspection/             # 巡检 Runner（扫描 + AI 研判 + 记录/工单）
 │   ├── logutil/                # 环形缓冲日志采集
 │   ├── models/                 # 数据模型（用户/域名/漏洞/工单/巡检记录/资产 asset.go）
+│   ├── ops/                    # 运维工具库：resetdb/genfingerprints/mockai/preflight 共享逻辑 + 统一日志
 │   ├── scanner/                # 扫描引擎：engine/crawler/detector/fingerprint/
 │   │                           #   rule_engine(YAML 规则引擎)/reporter(报告生成)/rules(embed)
 │   │                           #   asset_scanner(网络资产扫描器：DNS/端口/服务识别)
@@ -486,8 +497,12 @@ agent:
 │   └── storage/                # Neo4j 仓储：repository/user_repo/vulnerability_repo/
 │                               #   ticket_repo/inspection_repo/alert_repo/neo4j
 │                               #   asset_repo(资产图仓储)
-├── clown-src-6k-skill/         # SRC 漏洞挖掘知识库 + vuln-engine 企业级规则引擎
+├── clown-src-6k-skill/         # SRC 漏洞挖掘知识库 + vuln-engine 企业级规则引擎（YAML 规则源）
 │   └── vuln-engine/            #   scanner-config.yaml/rules(14 条 OWASP Top 10)/integrations
+├── security-ops-skill/         #   安全运维智能体（单一「自主执行」模式，无外部编排依赖）
+│   ├── SKILL.md                #   触发条件、自主执行工作流、工具清单
+│   ├── AGENTS.md               #   智能体编排配置：阶段 DAG、工具调用顺序、边界约束
+│   └── references/             #   autonomous-workflow / error-handling / output-contract
 ├── web/index.html              # 单文件前端（实时读盘）
 ├── config.yaml                 # 运行配置
 ├── logo.jpeg                   # 平台 Logo
@@ -502,7 +517,7 @@ agent:
 - **AI 研判不可用？** 配置 `DEEPSEEK_API_KEY` 或对应 provider 的 key；网络不可达时记录自动标记为 `partial`（本地兜底）。
 - **扫描启动失败？** 域名格式正确且状态为 active，且当前账号权限 ≥ 1。
 - **巡检记录长期 running/analyzing？** 多为服务重启中断了在途巡检；重启时平台会自动回收超时的孤儿记录。
-- **需要重置数据？** 参见仓库根目录 `reset_db.py`（独立脚本，谨慎使用，会清空图库）。
+- **需要重置数据？** 运行 `go run ./cmd/resetdb --confirm`（或 `--dry-run` 仅预览），会清空图库的全部节点与关系，谨慎使用。
 - **提交智能体任务提示 503「AI 模型未就绪」？** 确认 `config.yaml` 的 `ai.providers.*.enabled` 为 true 且对应 `api_key` 已配置；服务启动日志会显示已加载的 provider。
 - **智能体任务一直 running 不结束？** 单任务受 `agent.max_turns`（默认 24）上限与 LLM 超时约束；可在前端/接口 `POST /api/agent/tasks/:id/stop` 主动中止。步骤与结论持久化在 Neo4j（`:AgentTask` / `:AgentStep`），重启后仍可 `GET /api/agent/tasks/:id` 回看。
 - **智能体调用工具报错？** 工具调用 `recover` 捕获异常并以错误型 `<tool_result>` 回写，模型通常能自我纠正；若反复失败，检查目标实体是否存在（如 `get_domain` 先核实域名）与 Neo4j 连通性。
@@ -511,7 +526,71 @@ agent:
 
 ## 十、近期更新
 
+### v1.2.0(2026-09-03)
+
+智能体交付契约体系（enforceDeliverables）
+
+针对任务「声称完成但实际零交付」的历史缺陷（完结却零工单、零规则），构建结构化交付保障：
+
+- **交付契约（`DeliverableContract`）**：任务启动时解析目标串，提取建单需求（`NeedsTicket`）、类别筛选（`TicketCategories`）、排他模式（`Exclusive`）、规则需求（`NeedsRule`）、周期（`Schedule`）、目标资产（`TargetHost`），作为终止校验的唯一可信来源，取代散落的关键词硬编码。
+- **九类漏洞语义分类**：弱口令/数据泄露/注入类/权限配置/依赖组件/逻辑缺陷/信息泄露/Webshell/其他，与扫描器实际输出（`vulnTypeToCategory`）对齐；webshell 独立分类（不再误并入 data_leak）。
+- **强制交付校验（`enforceDeliverables`）**：收尾前硬性检查——模型声称建单/建规则但步骤无成功记录时打回补齐；连续 5 次仍未满足则触发安全阀（Safety Valve）强制收尾并写明未满足原因。
+- **假完成对账（`reconcileFinishClaim`）**：模型在 `finish_task` 摘要中声称完成交付但步骤无记录时，判定为假完成并拒绝收尾，防止模型「口头交付」。
+- **字段规范化（`normalizeTicketFields`）**：智能体建单时自动校验并补全必填字段（vuln_type/title/risk_level/asset_url/evidence/retest_method），缺失时使用可追溯默认值（`unknown`/`未命名安全工单`/`(scan_job:xxx)`），并记录补填说明便于审计。
+- **工单去重指纹（`ticketFingerprint`）**：基于「漏洞类型 + 影响资产 URL + 扫描作业」三要素 sha1 生成，同一扫描作业内同类型同 URL 视为同一条，复用而非新建，避免重复建单。
+
+**配套测试**：`contract_test.go`（交付契约解析/校验/安全阀/假完成对账）+ `ticket_coverage_test.go`（九类漏洞全覆盖/字段规范化/去重指纹/关键词回退），共 40+ 用例。
+
+工单系统增强（`/api/tickets/merge`）
+
+- **批量合并工单（`POST /api/tickets/merge`）**：将多个工单合并为一个，保留目标工单标题（`target_title`），支持 `source_ids` 数组批量指定来源；合并后自动归档来源工单，保留操作记录便于审计。
+- **批量删除工单（`POST /api/tickets/batch-delete`）**：一次性删除多个工单，管理员权限控制，避免逐个删除的低效操作。
+- **基线研判自动填充（`triageFromRisk`）**：工单创建时若未提供研判信息，根据 `risk_level`（high/medium/low）自动填充 `remediation_priority`（P0/P1/P2）、`harm_description`（危害描述）、`mitigation_measures`（处置建议）、`retest_method`（复检方法）。
+
+智能体运行稳定性提升
+
+- **任务硬超时（`taskHardTimeout`）**：单次任务受 30 分钟硬墙钟上限约束，防止 LLM 客户端无 deadline 时永久挂起导致任务永远停在 `running` 并拖垮服务进程。
+- **迭代上限（`maxIterations`）**：循环内存在多条不推进轮次的路径（parse_error 纠正/纯推理文本/nudge），该上限保证任何情况下都能退出，远大于真实轮询预算，不影响正常任务。
+- **首轮纯文本不直接收尾**：只有「连续两轮」纯文本才视为模型已给出结论并收尾，避免首轮纯文本（模型在「思考/预告下一步」）被误判为已完成。
+- **JSON 解析失败自纠正**：模型试图输出 `<tool_calls>` 但 JSON 解析失败时，将错误回写为纠正信号，让模型重新输出合法数组，而非直接当成「已给出结论」收尾。
+
+围绕「定时一次性扫描、历史任务复盘、多资产批量巡检」等真实运维场景，对智能体与巡检规则做能力增强：
+- **新增 4 个智能体工具**（内置工具总数 →30）：
+  - `get_current_time`：查询服务器当前时间（RFC3339 + Unix），供定时计算。
+  - `wait_until`：精确等待到指定 RFC3339 时刻（上限 24h，可取消），与 `get_current_time` 组合覆盖「25 分 30 秒后扫描」「今晚 20:00 扫一次」。
+  - `delete_inspection_rule`：删除巡检规则并即时摘除调度任务，覆盖「就扫一次，之后不要扫了」。
+  - `list_recent_tasks`：按回溯小时数读取近期自主任务，覆盖「把昨天的主要任务重新干一遍」。
+- **巡检规则支持多资产绑定**：`InspectionRule` 新增 `DomainIDs []string` 字段（保留 `DomainID` 兼容），一次配置即可让同一规则按 cron 周期对多个域名批量巡检；Runner 触发时为每个域名分别生成巡检记录，调度器/仓储/API/前端全链路适配（前端规则表单由单域名下拉改为多资产勾选）。
+- **系统提示词增强**：明确定时/延时、一次性扫描、复盘三类场景的工具组合用法，降低模型编排出错率。
+
+为自主智能体补齐「授权范围内的弱口令探测与有效性验证」能力，新增 3 个工具（内置工具总数 25 → 30），与既有只读分析 / 平台动作工具共用同一调用循环与错误回写：
+- **`manage_password_dict`**：弱口令字典管理，支持 list/show/add/reset/load；内置 `users`(34 条)/`passwords`(89 条) 字典（`go:embed`），运行时可追加或文件载入。
+- **`weak_password_scan`**：并发「用户名×口令」字典爆破（默认并发 10、超时 5s、组合上限 20000），命中即记录并默认二次复验；支持 ssh/ftp/pop3/smtp/redis/http(Basic Auth) 六类协议；可 `stop_on_first` 命中即停。
+- **`verify_credentials`**：对单条「用户名+口令」即时有效性验证（复验扫描命中或人工指定凭据），校验过程出错以 `error` 字段回写而非抛错，便于模型自纠正。
+- **集成与约束**：随 `RegisterBuiltinTools` 自动注册，无需改动 `agent.go` 主循环；命中凭据建议经 `create_ticket`/`send_alert` 回写闭环；仅可在授权范围内对显式 `target`+`service` 发起探测。详见 6.5.5。
+
+将 `clown-src-6k-skill` 知识库中的实战漏洞方法论形式化为结构化 YAML 规则库，并扩展 Go 后端扫描引擎消费这些规则，实现企业级漏洞发现能力：
+
+- **规则库**：14 条 OWASP Top 10 全覆盖结构化 YAML 规则（SQLi/XSS/IDOR/敏感文件/XXE/反序列化/SSRF/命令注入/安全配置/已知漏洞组件/认证失效/SSTI/路径穿越/文件上传），每条规则含 CVSS 3.1 向量、三层检测信号、误报过滤器、PoC 模板、修复建议。
+- **规则引擎**（`internal/scanner/rule_engine.go`）：`//go:embed` 内嵌加载 + 三层特异性信号匹配 + 多层确认（≥2 信号命中才上报）+ 置信度评分 + CVSS 3.1 八指标向量解析 + URL/Type 去重，将误报率从 92.1% 降至 0%。
+- **报告生成器**（`internal/scanner/reporter.go`）：Markdown（对齐 SRC 报告格式）/ JSON（机器可读统计）/ HTML（可视化卡片）三格式输出，含 PoC 自动生成。
+- **API 端点**：新增 `GET /api/scan/rules`（规则列表）与 `GET /api/scan/:id/report?format=markdown|json|html`（报告下载）。
+- **框架与工单集成配置**：`integrations/nuclei-profiles.yaml`（Nuclei 模板映射）+ `integrations/ticketing-webhook.yaml`（Jira/Linear/GitHub/GitLab/自定义 Webhook，含 CVSS→优先级映射）。
+- **测试验证**：18 个单元测试全 PASS（含 9 个规则引擎专项测试）+ 端到端扫描验证（15 漏洞，0 重复，0 误报）。
+
+针对用户普遍存在的网络资产认知不清晰问题，参考 `wanpinglingtan` 集成专业的网络暴露面扫描工具，并利用 Neo4j 图数据库与 ReactFlow 实现直观的资产拓扑可视化：
+
+- **网络资产扫描器**（`internal/scanner/asset_scanner.go`）：DNS 解析 + crt.sh 子域名枚举 + 50 并发 TCP 端口扫描（1000+ 常见端口）+ Banner/HTTP 服务识别（名称/版本/Title/技术栈）；异步执行（`context.Background()` + 10 分钟超时），裸 IP 目标自动跳过子域名枚举。
+- **Neo4j 资产图模型**（`internal/models/asset.go` + `internal/storage/asset_repo.go`）：新增 Subdomain / IP / Port / Service 四类节点与 HAS_SUBDOMAIN / RESOLVES_TO / EXPOSES / RUNS 四类关系；MERGE 幂等写入 + 多跳 OPTIONAL MATCH 图查询 + UNION 边查询。
+- **API 端点**：`POST /api/assets/scan/:domain_id`（异步触发）、`GET /api/assets/list/:domain_id`（资产明细列表）、`GET /api/assets/graph/:domain_id`（图数据节点+边）。
+- **ReactFlow 拓扑可视化**（`web/index.html`）：基于 ReactFlow@11 UMD CDN，分层布局（domain→subdomain→ip→port→service）、按类型着色、smoothstep 动画边；支持搜索过滤、节点点击详情、缩略图导航、缩放控件。已验证 3998 节点 / 3997 边大规模图谱正常渲染。
+- **页面合并**：网络资产拓扑图已作为 Tab 合并至「域名管理」页面，与域名列表共享域名选择器，减少导航层级，提升操作连贯性。
+- **测试验证**：功能测试（127.0.0.1: 4 端口/4 服务；example.com: 48 子域/41 IP/1995 端口/1913 服务）+ 性能测试（图谱 API 2s 返回 845KB 数据，前端 20s 渲染 4k 节点）+ UX 测试（搜索过滤/详情面板/缩略图全部通过）。
+
+将平台从「Go 主服务 + Python 运维脚本」改造为**可独立运行的纯 Go 项目**，消除 Python 运行耦合。
+
 ### v1.1.0(2026-09-03)
+
 **跨平台兼容**：后端改为纯 Go 单二进制，补充 Linux / macOS / Windows 交叉编译命令（`CGO_ENABLED=0 GOOS=... GOARCH=...`），部署不再受平台限制。
 
 **前端背景与品牌化**：单文件前端 `web/index.html` 增加背景图与平台 Logo（`logo.jpeg`）展示，登录与仪表盘页视觉统一。
@@ -519,6 +598,7 @@ agent:
 **启动方式文档化**：明确「Neo4j 直启 + 服务启动」的本机开发启动链路（见 3.2），并区分 Docker 与生产两种 Neo4j 启动方式。
 
 参考 [earendil-works/pi](https://github.com/earendil-works/pi) 的调用循环架构，将平台 AI 能力从「单次研判」升级为「多轮工具调用 + 自主规划」执行模式：
+
 - **模块划分**：`internal/agent` 下 `Agent`（调用循环）/ `ToolRegistry`（分发）/ `Tool`（原子能力）/ `Task`（状态机，持久化到 Neo4j）/ `ContextManager`（上下文压缩）/ `Manager`（生命周期）/ `tools`（只读分析）/ `tools_action`（平台动作）。详见 6.5。
 - **调用循环**：双层循环——外层按轮次推理，模型以 `<tool_calls>` 请求工具，内层依次执行并回写 `<tool_result>`；`finish_task` 或纯文本结论即终止；超轮次/取消/LLM 失败即收尾。
 - **数据库与平台集成**：27 个内置工具，直连本平台 Neo4j（统计/聚合/只读 Cypher 推理）与引擎/调度器（扫描、巡检、工单、告警、巡检规则），实现「分析 → 行动 → 结果回写」闭环。

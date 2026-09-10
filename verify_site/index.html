@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>漏洞测试靶站 - 首页</title>
+</head>
+<body>
+<h1>漏洞扫描器测试靶站</h1>
+<p>本页面刻意植入若干安全缺陷，用于验证扫描器能否检出。</p>
+
+<!-- XSS #1: javascript: 协议链接 -->
+<p><a href="javascript:alert(document.cookie)">点我（javascript: 协议 XSS）</a></p>
+
+<!-- 篡改/钓鱼 #1: 指向外部域名的 iframe -->
+<iframe src="https://external-evil.example.net/phish.html" width="300" height="150"></iframe>
+
+<h2>子页面导航</h2>
+<ul>
+  <li><a href="/xss.html">XSS 测试页</a></li>
+  <li><a href="/sqli.html?id=1' UNION SELECT username,password FROM users--">SQL 注入测试页</a></li>
+  <li><a href="/sqli.html?cat=2 OR 1=1">SQL 注入测试页（OR 1=1）</a></li>
+  <li><a href="/leak.html">敏感文件泄露测试页</a></li>
+  <li><a href="/webshell.html">Webshell 特征测试页</a></li>
+  <li><a href="/phishing.html">恶意外链测试页</a></li>
+  <li><a href="/page1.html">普通页面 A</a></li>
+  <li><a href="/page2.html">普通页面 B</a></li>
+</ul>
+</body>
+</html>

@@ -2,6 +2,7 @@ package storage
 
 import (
 	"fmt"
+	"net"
 	"time"
 
 	"github.com/google/uuid"
@@ -74,6 +75,41 @@ func (r *DomainRepository) List() ([]*models.Domain, error) {
 		}
 	}
 	return domains, result.Err()
+}
+
+// GetByHost 按资产 host（可含端口，如 127.0.0.1:8099）模糊匹配域名节点，
+// 用于「目标串只有 host、步骤未携带 domain_id」时反查归属域名（如安全巡检规则 / 兜底工单需关联域名）。
+// 匹配策略：name ENDS WITH host；兼容 host 去掉端口后的纯 IP 形式（如 127.0.0.1）。
+func (r *DomainRepository) GetByHost(host string) (*models.Domain, error) {
+	if host == "" {
+		return nil, fmt.Errorf("host empty")
+	}
+	candidates := []string{host}
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		candidates = append(candidates, h)
+	}
+	session := r.store.Session()
+	defer session.Close()
+	for _, c := range candidates {
+		if c == "" {
+			continue
+		}
+		result, err := session.Run(
+			`MATCH (d:Domain) WHERE d.name ENDS WITH $host RETURN d ORDER BY d.created_at DESC LIMIT 1`,
+			map[string]any{"host": c},
+		)
+		if err != nil {
+			continue
+		}
+		if result.Next() {
+			if val, ok := result.Record().Get("d"); ok {
+				if node, ok := val.(neo4j.Node); ok {
+					return r.nodeToDomain(node), nil
+				}
+			}
+		}
+	}
+	return nil, fmt.Errorf("domain not found for host %q", host)
 }
 
 func (r *DomainRepository) Update(domain *models.Domain) error {

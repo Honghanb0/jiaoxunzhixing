@@ -107,55 +107,89 @@ func registerActionTools(reg *ToolRegistry, d Deps) {
 
 	reg.Register(toolFunc{
 		name:        "create_ticket",
-		description: "创建一条安全工单（结果回写）。可由巡检发现或分析结论生成，便于后续处置跟踪。",
+		description: "创建一条安全工单（结果回写）。可由巡检发现或分析结论生成，便于后续处置跟踪。支持所有漏洞类型（注入/权限配置/组件/逻辑/信息泄露/数据泄露/弱口令/未知类型），缺失字段将以可追溯默认值补齐。",
 		schema: map[string]any{"type": "object", "properties": map[string]any{
 			"title":                map[string]any{"type": "string"},
-			"risk_level":           map[string]any{"type": "string", "description": "high/medium/low"},
+			"vuln_type":            map[string]any{"type": "string", "description": "漏洞类型：sqli/xss/idor/misconfiguration/vulnerable_component/logic/info_disclosure/sensitive_file/weak_password 等；未知可填 unknown"},
+			"vuln_name":            map[string]any{"type": "string"},
+			"vuln_id":              map[string]any{"type": "string", "description": "关联漏洞 ID（来自 list_vulnerabilities 的 id）"},
+			"vuln_description":     map[string]any{"type": "string"},
+			"risk_level":           map[string]any{"type": "string", "description": "high/medium/low；缺失按类型兜底"},
 			"asset_name":           map[string]any{"type": "string"},
 			"asset_url":            map[string]any{"type": "string"},
-			"vuln_name":            map[string]any{"type": "string"},
 			"description":          map[string]any{"type": "string"},
-			"evidence":             map[string]any{"type": "string"},
+			"evidence":             map[string]any{"type": "string", "description": "复现信息 / PoC / 证据数据"},
 			"harm_description":     map[string]any{"type": "string"},
 			"remediation_priority": map[string]any{"type": "string", "description": "P0/P1/P2"},
 			"mitigation_measures":  map[string]any{"type": "string"},
 			"retest_method":        map[string]any{"type": "string"},
+			"source":               map[string]any{"type": "string", "description": "来源标识，如 scan/agent/manual"},
+			"fingerprint":          map[string]any{"type": "string", "description": "去重指纹，省略则自动按 类型+资产+scan_job 生成"},
 			"scan_job_id":          map[string]any{"type": "string"},
 		}},
 		fn: func(ctx context.Context, args map[string]any) (string, error) {
 			log.Printf("[Agent][create_ticket] 调用开始 args=%+v", args)
-			title := getString(args, "title")
-			if title == "" {
-				title = "智能体创建的工单"
-			}
+
 			now := time.Now()
 			ticket := &models.Ticket{
-				Title:               title,
+				Title:               getString(args, "title"),
+				VulnType:            getString(args, "vuln_type"),
+				VulnName:            getString(args, "vuln_name"),
+				VulnID:              getString(args, "vuln_id"),
+				VulnDescription:     getString(args, "vuln_description"),
 				Type:                "investigation",
 				Status:              models.TicketStatusPending,
-				RiskLevel:           normRisk(getString(args, "risk_level")),
+				RiskLevel:           getString(args, "risk_level"),
 				AssetName:           getString(args, "asset_name"),
 				AssetURL:            getString(args, "asset_url"),
-				VulnName:            getString(args, "vuln_name"),
 				Description:         getString(args, "description"),
 				Evidence:            getString(args, "evidence"),
 				HarmDescription:     getString(args, "harm_description"),
 				RemediationPriority: getString(args, "remediation_priority"),
 				MitigationMeasures:  getString(args, "mitigation_measures"),
 				RetestMethod:        getString(args, "retest_method"),
+				Fingerprint:         getString(args, "fingerprint"),
 				ScanJobID:           getString(args, "scan_job_id"),
 				CreatorID:           "agent",
 				Notes:               "由自主智能体创建",
 				CreatedAt:           now,
 				UpdatedAt:           now,
 			}
-			if err := d.TicketRepo.Create(ticket); err != nil {
-				log.Printf("[Agent][create_ticket] 创建失败 title=%q risk=%s scan_job=%s err=%v",
-					title, ticket.RiskLevel, ticket.ScanJobID, err)
-				return "", err
+			// 统一校验并补全必填字段（标题/类型/风险/资产/来源/复现），缺失用可追溯默认值填充。
+			notes := normalizeTicketFields(ticket, normalizeTicketContext{})
+			if len(notes) > 0 {
+				ticket.Notes = strings.TrimSpace(ticket.Notes + " | 自动补填：" + strings.Join(notes, "; "))
+				log.Printf("[Agent][create_ticket] 字段补填 title=%q 说明=%s", ticket.Title, strings.Join(notes, "; "))
 			}
-			log.Printf("[Agent][create_ticket] 创建成功 ticket_id=%s title=%q risk=%s", ticket.ID, title, ticket.RiskLevel)
-			return toJSON(map[string]any{"ticket_id": ticket.ID, "status": ticket.Status}), nil
+
+			// 幂等去重：同一 scan_job_id 下已存在同指纹工单则复用，避免重复建单（重复检测误判修复）。
+			if d.TicketRepo != nil && ticket.ScanJobID != "" {
+				if existing, err := d.TicketRepo.FindByFingerprint(ticket.Fingerprint); err == nil && existing != nil {
+					if existing.ScanJobID == ticket.ScanJobID {
+						log.Printf("[Agent][create_ticket] 同指纹已存在（幂等复用） ticket_id=%s scan_job=%s", existing.ID, ticket.ScanJobID)
+						return toJSON(map[string]any{"ticket_id": existing.ID, "status": existing.Status, "duplicated": true}), nil
+					}
+				}
+			}
+
+			// 失败重试：Neo4j 瞬时故障 / 写竞争可能导致偶发失败，最多重试 3 次（指数退避短间隔）。
+			const maxAttempts = 3
+			var lastErr error
+			for attempt := 1; attempt <= maxAttempts; attempt++ {
+				if err := d.TicketRepo.Create(ticket); err != nil {
+					lastErr = err
+					backoff := time.Duration(attempt) * 150 * time.Millisecond
+					log.Printf("[Agent][create_ticket] 创建失败(第%d次) title=%q risk=%s scan_job=%s err=%v，%v 后重试",
+						attempt, ticket.Title, ticket.RiskLevel, ticket.ScanJobID, err, backoff)
+					time.Sleep(backoff)
+					continue
+				}
+				log.Printf("[Agent][create_ticket] 创建成功(第%d次) ticket_id=%s title=%q risk=%s vuln_type=%s",
+					attempt, ticket.ID, ticket.Title, ticket.RiskLevel, ticket.VulnType)
+				return toJSON(map[string]any{"ticket_id": ticket.ID, "status": ticket.Status}), nil
+			}
+			log.Printf("[Agent][create_ticket] 重试 %d 次仍失败 title=%q scan_job=%s err=%v", maxAttempts, ticket.Title, ticket.ScanJobID, lastErr)
+			return "", fmt.Errorf("创建工单失败（已重试 %d 次）：%w", maxAttempts, lastErr)
 		},
 	})
 

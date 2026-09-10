@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -156,7 +157,13 @@ func (p *compatProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespo
 	if out.Error != nil {
 		return nil, fmt.Errorf("%s: %s", p.spec.name, out.Error.Message)
 	}
+	// 部分厂商（如部分 OpenAI 兼容网关）会把限流/鉴权失败以 HTTP 200 + 业务错误码返回，
+	// 此时 out.Error 为空且 choices 为空。若直接返回 ErrEmptyResponse，会被上层误判为“空响应”
+	// 而不重试/降级。这里在 choices 为空时额外解析业务错误，识别为可重试错误。
 	if len(out.Choices) == 0 {
+		if biz := extractBizError(raw); biz != "" {
+			return nil, fmt.Errorf("%s: 业务错误(HTTP 200): %s", p.spec.name, biz)
+		}
 		return nil, fmt.Errorf("%s: %w", p.spec.name, ErrEmptyResponse)
 	}
 
@@ -372,6 +379,43 @@ func (p *compatProvider) post(ctx context.Context, body []byte, stream bool) (*h
 			return nil, lastErr
 		}
 	}
+}
+
+// bizErrorFields 捕获部分厂商在 HTTP 200 响应体内返回的非标准错误字段。
+type bizErrorFields struct {
+	Code     int    `json:"code"`
+	ErrCode  int    `json:"error_code"`
+	Msg      string `json:"msg"`
+	Message  string `json:"message"`
+	ErrorMsg string `json:"error_msg"`
+	ErrMsg   string `json:"err_msg"`
+}
+
+// extractBizError 从响应体解析业务层错误（HTTP 200 但含错误码/错误信息）。
+// 仅当检测到明确的错误指示时返回非空字符串，否则返回空（视为正常响应）。
+func extractBizError(raw []byte) string {
+	var f bizErrorFields
+	if err := json.Unmarshal(raw, &f); err != nil {
+		return ""
+	}
+	// 错误码非 0（0/缺省视为成功）
+	if f.Code != 0 || f.ErrCode != 0 {
+		msg := strings.TrimSpace(f.Msg + " " + f.Message + " " + f.ErrorMsg + " " + f.ErrMsg)
+		if msg == "" {
+			msg = "错误码 " + strconv.Itoa(f.Code+f.ErrCode)
+		}
+		return msg
+	}
+	// 无错误码但有错误文案（含 error/rate/failed 等关键词）
+	low := strings.ToLower(f.Msg + " " + f.Message + " " + f.ErrorMsg + " " + f.ErrMsg)
+	if low != "" {
+		for _, kw := range []string{"error", "rate limit", "ratelimit", "too many", "invalid", "unauthorized", "forbidden", "expired", "denied", "failed"} {
+			if strings.Contains(low, kw) {
+				return strings.TrimSpace(f.Msg + " " + f.Message)
+			}
+		}
+	}
+	return ""
 }
 
 func (p *compatProvider) parseError(status int, raw []byte) error {

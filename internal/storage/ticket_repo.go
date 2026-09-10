@@ -2,6 +2,7 @@ package storage
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -184,6 +185,114 @@ func (r *TicketRepository) Delete(id string) error {
 	defer session.Close()
 	_, err := session.Run(query, map[string]any{"id": id})
 	return err
+}
+
+// DeleteBatch 批量删除工单
+func (r *TicketRepository) DeleteBatch(ids []string) (int, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	session := r.store.Session()
+	defer session.Close()
+
+	// 构建 Cypher 的 IN 子句
+	query := `UNWIND $ids AS id MATCH (t:Ticket {id: id}) DETACH DELETE t`
+	_, err := session.Run(query, map[string]any{"ids": ids})
+	if err != nil {
+		return 0, err
+	}
+	return len(ids), nil
+}
+
+// MergeTickets 批量合并工单：将多个源工单的内容合并到一个新的工单中，删除源工单。
+// 合并策略：主工单取第一个源工单的内容，附加其他工单的标题、描述、备注汇总。
+func (r *TicketRepository) MergeTickets(sourceIDs []string, targetTitle string) (*models.Ticket, error) {
+	if len(sourceIDs) < 2 {
+		return nil, fmt.Errorf("合并至少需要2个工单")
+	}
+
+	session := r.store.Session()
+	defer session.Close()
+
+	// 获取所有源工单
+	var sourceTickets []*models.Ticket
+	for _, id := range sourceIDs {
+		ticket, err := r.GetByID(id)
+		if err == nil && ticket != nil {
+			sourceTickets = append(sourceTickets, ticket)
+		}
+	}
+
+	if len(sourceTickets) < 2 {
+		return nil, fmt.Errorf("有效工单不足，无法合并")
+	}
+
+	// 第一个工单作为主工单，收集其他工单的信息
+	mainTicket := sourceTickets[0]
+	var mergedNotes []string
+	var mergedDescriptions []string
+	var mergedTitles []string
+
+	if mainTicket.Notes != "" {
+		mergedNotes = append(mergedNotes, mainTicket.Notes)
+	}
+	if mainTicket.Description != "" {
+		mergedDescriptions = append(mergedDescriptions, mainTicket.Description)
+	}
+	mergedTitles = append(mergedTitles, mainTicket.Title)
+
+	for i := 1; i < len(sourceTickets); i++ {
+		t := sourceTickets[i]
+		mergedTitles = append(mergedTitles, t.Title)
+		if t.Notes != "" {
+			mergedNotes = append(mergedNotes, t.Notes)
+		}
+		if t.Description != "" && t.Description != mainTicket.Description {
+			mergedDescriptions = append(mergedDescriptions, t.Description)
+		}
+	}
+
+	// 构建合并后的内容
+	now := time.Now()
+	mergedTitle := targetTitle
+	if mergedTitle == "" {
+		mergedTitle = fmt.Sprintf("合并工单 (%s等)", strings.Join(mergedTitles, " | "))
+	}
+	mergedDescription := strings.Join(mergedDescriptions, "\n\n---\n\n")
+	mergedNotesStr := strings.Join(mergedNotes, "\n")
+
+	// 更新主工单
+	updateQuery := `MATCH (t:Ticket {id: $id}) SET
+		t.title = $title,
+		t.description = $description,
+		t.notes = $notes,
+		t.updated_at = datetime($updated_at)`
+	_, err := session.Run(updateQuery, map[string]any{
+		"id":          mainTicket.ID,
+		"title":       mergedTitle,
+		"description": mergedDescription,
+		"notes":       mergedNotesStr,
+		"updated_at":  now.Format(time.RFC3339),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("更新合并工单失败: %v", err)
+	}
+
+	// 删除其他源工单
+	deleteQuery := `MATCH (t:Ticket) WHERE t.id IN $ids DETACH DELETE t`
+	var idsToDelete []string
+	for i := 1; i < len(sourceTickets); i++ {
+		idsToDelete = append(idsToDelete, sourceTickets[i].ID)
+	}
+	if len(idsToDelete) > 0 {
+		_, err := session.Run(deleteQuery, map[string]any{"ids": idsToDelete})
+		if err != nil {
+			return nil, fmt.Errorf("删除源工单失败: %v", err)
+		}
+	}
+
+	// 返回更新后的主工单
+	return r.GetByID(mainTicket.ID)
 }
 
 func (r *TicketRepository) nodeToTicket(node neo4j.Node) *models.Ticket {

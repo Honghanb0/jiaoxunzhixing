@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"regexp"
 	"strings"
 )
@@ -104,28 +105,95 @@ func (r *ToolRegistry) Descriptions() string {
 //	<tool_result name="query_neo4j" call_id="call_1" error="false">
 //	{...json...}
 //	</tool_result>
-var toolCallsRe = regexp.MustCompile(`(?s)<tool_calls>(.*?)</tool_calls>`)
+// 允许 <tool_calls> / </tool_calls> 之间夹带分词器产物（如 </｜｜DSML｜｜tool_calls>）：
+// 开头与结尾的标签均可包含任意非 '>' 字符前缀，从而容忍模型偶发的畸形闭合标签，
+// 避免 wait_scan 等工具调用被整段丢弃导致后续步骤无法读取结果。
+var toolCallsRe = regexp.MustCompile(`(?s)<[^>]*tool_calls>(.*?)</[^>]*tool_calls>`)
+
+// toolCallsUnclosedRe 兜底匹配「围栏有头无尾 / 闭合标签被截断」的输出，
+// 例如模型输出被 max_tokens 截断成 `...</tool_calls`（缺少 '>'），或干脆没有闭合标签。
+// 此时把围栏起点之后的内容全部视为负载，尽量抢救出其中的工具调用——否则这些调用会被
+// 静默丢弃（解析出 0 个调用且无错误），外层循环会误把这段畸形 JSON 当成「最终结论」收尾。
+var toolCallsUnclosedRe = regexp.MustCompile(`(?s)<[^>]*tool_calls>(.*)$`)
 
 // ParseToolCalls 从模型输出中解析工具调用；无调用块时返回 (nil, nil)。
+// 注意：模型可能在一次回复里输出多个 <tool_calls> 块（尤其在 JSON 解析纠正轮次后），
+// 这里用 FindAll 提取「所有」块并合并其中的调用，避免第二个块里的工具调用被整段静默丢弃
+// （此前仅用 FindStringSubmatch 取首个块，导致 create_inspection_rule 等调用被无声跳过）。
 func ParseToolCalls(content string) ([]ToolCall, error) {
-	m := toolCallsRe.FindStringSubmatch(content)
-	if m == nil {
-		return nil, nil
+	blocks := toolCallsRe.FindAllStringSubmatch(content, -1)
+	var rawBlocks []string
+	for _, m := range blocks {
+		rawBlocks = append(rawBlocks, strings.TrimSpace(m[1]))
 	}
-	raw := strings.TrimSpace(m[1])
-	if raw == "" {
-		return nil, nil
+	// 兜底1：围栏有头无尾 / 闭合标签被截断（如 "</tool_calls" 少了 '>'）——
+	// 取围栏起点之后的全部内容作为负载，抢救其中的工具调用。
+	if len(rawBlocks) == 0 {
+		if m := toolCallsUnclosedRe.FindStringSubmatch(content); m != nil {
+			payload := strings.TrimSpace(m[1])
+			// 去掉可能残留的残缺闭合标签前缀（如 "</tool_calls"、"</｜｜DSML｜｜tool_calls"）
+			if idx := strings.LastIndex(payload, "</"); idx >= 0 {
+				payload = strings.TrimSpace(payload[:idx])
+			}
+			if payload != "" {
+				log.Printf("[Agent][ParseToolCalls] 检测到未闭合的 <tool_calls> 围栏，按截断负载抢救解析")
+				rawBlocks = []string{payload}
+			}
+		}
+	}
+	// 兜底2：部分模型可能省略 <tool_calls> 围栏，直接输出 JSON 数组/对象。
+	if len(rawBlocks) == 0 {
+		trimmed := strings.TrimSpace(content)
+		if strings.HasPrefix(trimmed, "[") || strings.HasPrefix(trimmed, "{") {
+			rawBlocks = []string{trimmed}
+		}
 	}
 	var calls []ToolCall
-	if err := json.Unmarshal([]byte(raw), &calls); err != nil {
+	var firstErr error
+	for _, raw := range rawBlocks {
+		if raw == "" {
+			continue
+		}
+		block, err := parseToolCallPayload(raw)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("工具调用 JSON 解析失败: %w", err)
+			}
+			continue // 跳过该块，但继续解析其他块，避免一个畸形块拖垮整批调用
+		}
+		calls = append(calls, block...)
+	}
+	if len(calls) == 0 {
+		if firstErr != nil {
+			return nil, firstErr
+		}
+		// 输出里出现了 <tool_calls> 围栏却解析不出任何调用（JSON 非法/被截断）：
+		// 必须返回错误，让外层把错误回写为纠正信号要求模型重发，
+		// 而不是返回 (nil, nil) 让循环把这段畸形 JSON 误当成「最终结论」收尾。
+		if len(rawBlocks) > 0 {
+			return nil, fmt.Errorf("检测到 <tool_calls> 块但未能解析出任何工具调用（内容可能非法或被截断）")
+		}
+		return nil, nil
+	}
+	return finalizeCalls(calls), nil
+}
+
+// parseToolCallPayload 解析单个工具调用负载：优先按数组解析，失败再按单对象解析。
+func parseToolCallPayload(raw string) ([]ToolCall, error) {
+	var block []ToolCall
+	if err := json.Unmarshal([]byte(raw), &block); err != nil {
 		// 兼容单对象（非数组）写法
 		var single ToolCall
 		if err2 := json.Unmarshal([]byte(raw), &single); err2 == nil && single.Name != "" {
-			calls = []ToolCall{single}
-		} else {
-			return nil, fmt.Errorf("工具调用 JSON 解析失败: %w", err)
+			return []ToolCall{single}, nil
 		}
+		return nil, err
 	}
+	return block, nil
+}
+
+// finalizeCalls 补全每条调用的缺省字段（CallID / Arguments）。
+func finalizeCalls(calls []ToolCall) []ToolCall {
 	for i := range calls {
 		if calls[i].CallID == "" {
 			calls[i].CallID = fmt.Sprintf("call_%d", i+1)
@@ -134,7 +202,7 @@ func ParseToolCalls(content string) ([]ToolCall, error) {
 			calls[i].Arguments = map[string]any{}
 		}
 	}
-	return calls, nil
+	return calls
 }
 
 // RenderToolResult 将工具结果渲染为回写文本。
@@ -154,6 +222,15 @@ func toJSON(v any) string {
 }
 
 func containsStr(s, sub string) bool { return strings.Contains(s, sub) }
+
+func containsAny(s string, subs []string) bool {
+	for _, sub := range subs {
+		if sub != "" && strings.Contains(s, sub) {
+			return true
+		}
+	}
+	return false
+}
 
 func truncate(s string, n int) string {
 	r := []rune(s)

@@ -122,9 +122,13 @@ func NewServerWithEngine(cfg *config.Config, store *storage.Neo4jStore, engine *
 		{
 			tickets.GET("", ticketHandler.List)
 			tickets.POST("", ticketHandler.Create)
+			// 注意：具体路径必须在 /:id 前面，否则会被 /:id 优先匹配
+			tickets.POST("/batch-delete", ticketHandler.DeleteBatch)
+			tickets.POST("/merge", ticketHandler.Merge)
 			tickets.GET("/:id", ticketHandler.Get)
 			tickets.PATCH("/:id", ticketHandler.Update)
 			tickets.POST("/:id/notes", ticketHandler.AddNote)
+			tickets.DELETE("/:id", ticketHandler.Delete)
 		}
 
 		admin := protected.Group("/admin")

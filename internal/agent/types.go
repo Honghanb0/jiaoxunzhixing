@@ -79,6 +79,9 @@ type Task struct {
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	// Contract 是任务目标的「结构化交付契约」：把自然语言目标解析为机器可校验的交付义务
+	// （建单类别 / 定时巡检 cron / 目标资产），任务终止时按契约逐项校验，取代关键词硬编码判定。
+	Contract *DeliverableContract `json:"contract,omitempty"`
 }
 
 // Snapshot 返回任务的安全副本（拷贝切片，避免与写入协程竞争）。
@@ -104,6 +107,9 @@ func (t *Task) snapshotLocked() *Task {
 		CreatedAt:   t.CreatedAt,
 		UpdatedAt:   t.UpdatedAt,
 		CompletedAt: t.CompletedAt,
+		// 交付契约在任务启动时由 parseContractIntent 解析一次并写入，之后只读（resolveContract 仅拷贝其字段），
+		// 因此快照直接共享指针是安全的；此前遗漏此字段会导致运行中的任务在 GET /tasks/:id 时 contract 恒为 null。
+		Contract: t.Contract,
 	}
 	return cp
 }

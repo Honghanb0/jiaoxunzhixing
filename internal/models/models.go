@@ -106,6 +106,7 @@ func VulnFingerprint(domainID, vulnType, url, param string) string {
 // SensitiveInfo 敏感信息泄露
 type SensitiveInfo struct {
 	ID         string    `json:"id" neo4j:"id"`
+	DomainID   string    `json:"domain_id" neo4j:"domain_id"`
 	ScanJobID   string    `json:"scan_job_id" neo4j:"scan_job_id"`
 	PageID      string    `json:"page_id" neo4j:"page_id"`
 	Type        string    `json:"type" neo4j:"type"`               // email, api_key, private_key, etc.
