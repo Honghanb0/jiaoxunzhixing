@@ -174,6 +174,11 @@ type SensitiveConfig struct {
 	Keywords       []string `mapstructure:"keywords"`
 	RegexPatterns  []string `mapstructure:"regex_patterns"`
 	FileExtensions []string `mapstructure:"file_extensions"`
+
+	// Samples 本单位敏感信息样例（如一条真实工号、一个内部邮箱）。
+	// 平台据此自动派生关键词与模糊正则（见 scanner.DeriveSampleRules），
+	// 让不具备正则能力的运维也能把"我们单位的数据长什么样"直接配进来。
+	Samples []string `mapstructure:"samples"`
 }
 
 type AlertsConfig struct {

@@ -23,12 +23,31 @@ type Detector struct {
 func NewDetector(cfg *config.ScannerConfig, sensitiveCfg *config.SensitiveConfig, vulnRepo *storage.VulnerabilityRepository, sensitiveRepo *storage.SensitiveInfoRepository) *Detector {
 	return &Detector{
 		cfg:           cfg,
-		sensitiveCfg:  sensitiveCfg,
+		sensitiveCfg:  effectiveSensitiveConfig(sensitiveCfg),
 		vulnRepo:      vulnRepo,
 		sensitiveRepo: sensitiveRepo,
 		fingerprints:  initFingerprints(),
 		ruleEngine:    NewRuleEngine(""), // 默认加载内嵌规则
 	}
+}
+
+// effectiveSensitiveConfig 在配置的关键词/正则之外，并入由「样例」自动派生的规则。
+//
+// 返回副本而不是就地修改，避免调用方传入的配置对象被悄悄改写
+// （同一份 config 会被 Detector 与巡检/报告等多处复用）。
+func effectiveSensitiveConfig(cfg *config.SensitiveConfig) *config.SensitiveConfig {
+	if cfg == nil {
+		return &config.SensitiveConfig{}
+	}
+	out := *cfg
+	if len(cfg.Samples) == 0 {
+		return &out
+	}
+
+	kw, re := DeriveSampleRules(cfg.Samples)
+	out.Keywords = append(append([]string{}, cfg.Keywords...), kw...)
+	out.RegexPatterns = append(append([]string{}, cfg.RegexPatterns...), re...)
+	return &out
 }
 
 // SetRuleEngine 允许外部注入自定义规则引擎（如从外部目录加载规则）

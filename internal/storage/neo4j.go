@@ -141,6 +141,7 @@ func (s *Neo4jStore) initSchema() error {
 		"CREATE CONSTRAINT alert_id_unique IF NOT EXISTS FOR (a:Alert) REQUIRE (a.id) IS UNIQUE",
 		"CREATE CONSTRAINT ticket_id_unique IF NOT EXISTS FOR (t:Ticket) REQUIRE (t.id) IS UNIQUE",
 		"CREATE CONSTRAINT page_id_unique IF NOT EXISTS FOR (p:Page) REQUIRE (p.id) IS UNIQUE",
+		"CREATE CONSTRAINT baseline_domain_unique IF NOT EXISTS FOR (b:Baseline) REQUIRE (b.domain_id) IS UNIQUE",
 	}
 
 	indexes := []string{
@@ -156,6 +157,8 @@ func (s *Neo4jStore) initSchema() error {
 		"CREATE INDEX ticket_status_idx IF NOT EXISTS FOR (t:Ticket) ON (t.status)",
 		"CREATE INDEX user_username_idx IF NOT EXISTS FOR (u:User) ON (u.username)",
 		"CREATE INDEX page_domain_idx IF NOT EXISTS FOR (p:Page) ON (p.domain_id)",
+		// 基线对比按扫描批次取页面快照，必须有该索引，否则每次对比都全库扫 Page
+		"CREATE INDEX page_scanjob_idx IF NOT EXISTS FOR (p:Page) ON (p.scan_job_id)",
 	}
 
 	session := s.driver.NewSession(neo4j.SessionConfig{DatabaseName: s.cfg.Database})

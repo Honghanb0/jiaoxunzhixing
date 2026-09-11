@@ -88,6 +88,12 @@ func NewServerWithEngine(cfg *config.Config, store *storage.Neo4jStore, engine *
 	inspHandler := NewInspectionHandler(ruleRepo, recordRepo, domainRepo, sched, aiMgr)
 	logHandler := NewLogHandler()
 	assetHandler := NewAssetHandler(engine)
+	retestHandler := NewRetestHandler(engine, vulnRepo)
+	// engine 为 nil 时基线能力不可用（例如仅构造 HTTP 层做单测），此时不注册相关路由。
+	var baselineHandler *BaselineHandler
+	if engine != nil {
+		baselineHandler = NewBaselineHandler(engine, storage.NewBaselineRepository(store), scanJobRepo, domainRepo)
+	}
 
 	// 自主智能体（多轮工具调用 + 自主规划）：若调用方未注入则按需构建
 	if agentMgr == nil && aiMgr != nil && engine != nil && sched != nil {
@@ -120,6 +126,14 @@ func NewServerWithEngine(cfg *config.Config, store *storage.Neo4jStore, engine *
 			domains.GET("/:id/scans", domainHandler.GetScanJobs)
 		}
 
+		// 巡检基线：设置/删除属于改变巡检判定基准的操作，要求巡检员及以上
+		if baselineHandler != nil {
+			domains.GET("/:id/baseline", baselineHandler.Get)
+			domains.GET("/:id/baseline/diff", baselineHandler.Diff)
+			domains.POST("/:id/baseline", RequireRoleLevel(models.RoleLevelScanner), baselineHandler.Set)
+			domains.DELETE("/:id/baseline", RequireRoleLevel(models.RoleLevelScanner), baselineHandler.Delete)
+		}
+
 		scan := protected.Group("/scan")
 		{
 			scan.POST("/start", scanHandler.StartScan)
@@ -143,6 +157,13 @@ func NewServerWithEngine(cfg *config.Config, store *storage.Neo4jStore, engine *
 			tickets.PATCH("/:id", ticketHandler.Update)
 			tickets.POST("/:id/notes", ticketHandler.AddNote)
 			tickets.DELETE("/:id", ticketHandler.Delete)
+		}
+
+		// 风险复测：复测会真实请求目标 URL，属于主动动作，要求巡检员及以上
+		vulns := protected.Group("/vulnerabilities")
+		{
+			vulns.GET("/:id", retestHandler.Get)
+			vulns.POST("/:id/retest", RequireRoleLevel(models.RoleLevelScanner), retestHandler.Retest)
 		}
 
 		admin := protected.Group("/admin")

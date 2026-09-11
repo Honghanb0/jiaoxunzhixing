@@ -75,7 +75,8 @@ type Engine struct {
 	vulnRepo      *storage.VulnerabilityRepository
 	sensitiveRepo *storage.SensitiveInfoRepository
 	pageRepo      *storage.PageRepository
-	assetRepo     *storage.AssetRepository // 资产图仓储
+	assetRepo     *storage.AssetRepository    // 资产图仓储
+	baselineRepo  *storage.BaselineRepository // 巡检基线仓储
 	aiModule      *ai.AIModule
 	ruleEngine    *RuleEngine // 企业级漏洞规则引擎
 	reporter      *Reporter   // 漏洞报告生成器（Markdown/JSON/HTML + 工单集成）
@@ -122,11 +123,139 @@ func NewEngine(cfg *config.Config, store *storage.Neo4jStore, aiMgr *ai.Manager)
 		sensitiveRepo: sensitiveRepo,
 		pageRepo:      pageRepo,
 		assetRepo:     assetRepo,
+		baselineRepo:  storage.NewBaselineRepository(store),
 		aiModule:      aiModule,
 		ruleEngine:    ruleEngine,
 		reporter:      reporter,
 		stopCh:        make(chan struct{}),
 	}
+}
+
+// BaselineDiffForScan 计算某次扫描结果相对域名基线的差异。
+// 返回 (nil, nil) 表示该域名尚未设置基线——这不是错误，调用方据此提示用户先设基线。
+func (e *Engine) BaselineDiffForScan(scanJobID string, domainID string) (*models.BaselineDiff, error) {
+	base, err := e.baselineRepo.GetByDomain(domainID)
+	if err != nil {
+		return nil, err
+	}
+	if base == nil {
+		return nil, nil
+	}
+	pages, err := e.pageRepo.ListByScanJob(scanJobID)
+	if err != nil {
+		return nil, err
+	}
+	vulns, err := e.vulnRepo.ListByScanJob(scanJobID)
+	if err != nil {
+		return nil, err
+	}
+	return DiffAgainstBaseline(base, scanJobID, pages, vulns)
+}
+
+// SetBaselineFromScan 把某次扫描的结果设为该域名的巡检基线。
+func (e *Engine) SetBaselineFromScan(scanJobID string, domainID string, note string) (*models.Baseline, error) {
+	pages, err := e.pageRepo.ListByScanJob(scanJobID)
+	if err != nil {
+		return nil, err
+	}
+	vulns, err := e.vulnRepo.ListByScanJob(scanJobID)
+	if err != nil {
+		return nil, err
+	}
+	if len(pages) == 0 {
+		return nil, fmt.Errorf("该次扫描没有抓到任何页面，不适合作为基线（请确认扫描是否成功、目标是否可达）")
+	}
+	base, err := BuildBaselineSnapshot(domainID, scanJobID, pages, vulns, note)
+	if err != nil {
+		return nil, err
+	}
+	if err := e.baselineRepo.Save(base); err != nil {
+		return nil, err
+	}
+	return base, nil
+}
+
+// retestTimeout 单次复测的墙钟上限。
+// 复测只打一个 URL，正常情况下秒级返回；给 60s 是为了容忍目标站偶发慢响应，
+// 同时又不会让"目标站 hang 住"把复测请求无限挂起。
+const retestTimeout = 60 * time.Second
+
+// RetestVulnerability 对单条风险执行复测。
+//
+// 命题要求巡检支持"复测"，并对结果做"验证"。复测的实现思路是：
+// 重新抓取该风险对应的 URL → 用同一套检测逻辑重跑 → 看同类型发现是否复现。
+//
+//	复现  → still_present（风险仍在，Verified=true，代表"已验证的真实风险"）
+//	不复现 → fixed（判定已修复）
+//	抓不到 → inconclusive（目标不可达，宁可判"无法判定"也不误判为"已修复"）
+//
+// 复测复用爬虫的 HTTP 客户端与限速器，因此同样受速率约束、只发 GET，保持非破坏性。
+func (e *Engine) RetestVulnerability(ctx context.Context, vulnID string) (*models.RetestResult, error) {
+	v, err := e.vulnRepo.GetByID(vulnID)
+	if err != nil {
+		return nil, fmt.Errorf("风险不存在: %w", err)
+	}
+
+	res := &models.RetestResult{
+		VulnerabilityID: v.ID,
+		URL:             v.URL,
+		VulnType:        v.Type,
+		Status:          models.RetestInconclusive,
+		CheckedAt:       time.Now(),
+		RetestCount:     v.RetestCount + 1,
+	}
+
+	// 没有 URL 的风险（如纯配置类发现）无法自动复测，如实标注而非假装成功
+	if strings.TrimSpace(v.URL) == "" {
+		res.Message = "该风险未关联具体 URL，无法自动复测，需人工复核"
+		_ = e.vulnRepo.UpdateRetest(v.ID, res.Status, false, res.Message, res.CheckedAt)
+		return res, nil
+	}
+
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	rctx, cancel := context.WithTimeout(ctx, retestTimeout)
+	defer cancel()
+
+	rr := e.crawler.FetchOnce(rctx, v.URL)
+	if rr == nil || rr.Error != nil {
+		res.Message = "目标不可达或请求失败，无法判定是否已修复，需人工复核"
+		_ = e.vulnRepo.UpdateRetest(v.ID, res.Status, false, res.Message, res.CheckedAt)
+		return res, nil
+	}
+
+	page := rr.Page
+	res.HTTPStatus = page.StatusCode
+
+	found, _ := e.detector.DetectVulnerabilities(page, v.ScanJobID)
+	stillPresent := false
+	for _, nv := range found {
+		if nv == nil || !strings.EqualFold(nv.Type, v.Type) {
+			continue
+		}
+		// 参数维度也对上才算同一处风险；两侧任一为空视为通配
+		if v.Parameter != "" && nv.Parameter != "" && nv.Parameter != v.Parameter {
+			continue
+		}
+		stillPresent = true
+		break
+	}
+
+	if stillPresent {
+		res.Status = models.RetestStillPresent
+		res.Verified = true
+		res.Message = "复测确认该风险仍然存在，建议按修复建议继续处置"
+	} else {
+		res.Status = models.RetestFixed
+		res.Verified = false
+		res.Message = "复测未再检出同类型风险，判定为已修复；如需可再次复测交叉确认"
+	}
+
+	if err := e.vulnRepo.UpdateRetest(v.ID, res.Status, res.Verified, res.Message, res.CheckedAt); err != nil {
+		log.Printf("[Retest] %s 写入复测结果失败: %v", v.ID, err)
+	}
+	return res, nil
 }
 
 // GenerateReport 为指定扫描任务生成多格式报告（Markdown/JSON/HTML）
@@ -362,6 +491,7 @@ func (e *Engine) runScan(scanCtx context.Context, scanJob *models.ScanJob, domai
 		pageModel := &models.Page{
 			ID:          page.ID,
 			DomainID:    page.DomainID,
+			ScanJobID:   scanJob.ID, // 记录批次归属：基线对比与跨次篡改检测都依赖它
 			URL:         page.URL,
 			Title:       page.Title,
 			StatusCode:  page.StatusCode,
@@ -376,6 +506,11 @@ func (e *Engine) runScan(scanCtx context.Context, scanJob *models.ScanJob, domai
 			v.PageID = page.ID
 			v.DomainID = domain.ID
 			v.Fingerprint = models.VulnFingerprint(domain.ID, v.Type, v.URL, v.Parameter)
+			// 验证标记：只有经过多层信号确认（confidence=high）的发现才标记为"已验证"。
+			// 单信号命中的发现保留为待验证，避免把疑似项直接当结论上报；
+			// 后续可由复测接口（POST /api/vulnerabilities/:id/retest）确认。
+			v.Verified = strings.EqualFold(v.Confidence, "high")
+			v.RetestStatus = models.RetestNotRetested
 			e.vulnRepo.Create(v)
 			vulns = append(vulns, v)
 		}
@@ -422,6 +557,17 @@ func (e *Engine) runScan(scanCtx context.Context, scanJob *models.ScanJob, domai
 	e.addLog(scanJob.ID, fmt.Sprintf("Scan job %s completed: %d pages, %d vulns (H:%d M:%d L:%d), %d sensitive infos",
 		scanJob.ID, summary.TotalPages, summary.TotalVulns,
 		summary.HighSeverity, summary.MediumSeverity, summary.LowSeverity, summary.SensitiveFound))
+
+	// 基线对比：若该域名已设置基线，则自动比对本次扫描的漂移并写入扫描日志，
+	// 让"站点是否被改动、风险是否新增"在巡检结果里直接可见，无需人工翻两次报告。
+	if diff, derr := e.BaselineDiffForScan(scanJob.ID, domain.ID); derr != nil {
+		log.Printf("[Baseline] %s 基线对比失败: %v", scanJob.ID, derr)
+	} else if diff != nil {
+		e.addLog(scanJob.ID, "[基线对比] "+diff.Summary)
+		for _, c := range diff.PagesChanged {
+			e.addLog(scanJob.ID, fmt.Sprintf("[基线对比] 页面变更: %s", c.URL))
+		}
+	}
 }
 
 // abort 被取消/超时时的统一收尾

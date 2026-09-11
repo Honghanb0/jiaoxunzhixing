@@ -34,6 +34,15 @@ func (c *Crawler) SetProgressCallback(cb func(crawled, total int, currentURL str
 	c.onProgress = cb
 }
 
+// FetchOnce 抓取单个 URL 并返回页面信息，供"复测"使用。
+//
+// 与爬取流程的区别：不走队列、不做作用域判断、不写库、不递归，
+// 只发一次 GET 并解析出标题/内容指纹/原文，用于确认某条风险是否仍然存在。
+// 仍然复用同一个 HTTP 客户端与限速器，因此复测流量同样受速率约束、同样非破坏性。
+func (c *Crawler) FetchOnce(ctx context.Context, url string) *CrawlResult {
+	return c.crawlPage(&CrawlContext{Ctx: ctx}, &CrawlTask{URL: url, Depth: 0})
+}
+
 type CrawlResult struct {
 	Page  *PageInfo
 	Links []string

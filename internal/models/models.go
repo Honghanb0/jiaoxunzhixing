@@ -52,6 +52,7 @@ type ScanSummary struct {
 type Page struct {
 	ID          string    `json:"id" neo4j:"id"`
 	DomainID    string    `json:"domain_id" neo4j:"domain_id"`
+	ScanJobID   string    `json:"scan_job_id,omitempty" neo4j:"scan_job_id"` // 所属扫描批次，用于基线对比与跨次篡改检测
 	URL         string    `json:"url" neo4j:"url"`
 	Title       string    `json:"title" neo4j:"title"`
 	StatusCode  int       `json:"status_code" neo4j:"status_code"`
@@ -78,6 +79,13 @@ type Vulnerability struct {
 	Remediation string    `json:"remediation" neo4j:"remediation"` // 修复建议
 	Verified    bool      `json:"verified" neo4j:"verified"`
 	FoundAt     time.Time `json:"found_at" neo4j:"found_at"`
+
+	// 复测相关：命题要求巡检支持"复测"，即修复后能确认问题是否真的消失。
+	// RetestStatus 取值：not_retested / still_present（仍存在）/ fixed（已修复）/ inconclusive（无法判定）
+	RetestStatus string     `json:"retest_status,omitempty" neo4j:"retest_status"`
+	RetestAt     *time.Time `json:"retest_at,omitempty" neo4j:"retest_at"`
+	RetestCount  int        `json:"retest_count,omitempty" neo4j:"retest_count"`
+	RetestNote   string     `json:"retest_note,omitempty" neo4j:"retest_note"`
 	// Fingerprint 去重指纹：维度为「域名 + 漏洞类型 + 受影响 URL + 参数」。
 	// 由 VulnFingerprint 计算；历史存量（未落库指纹）为 ""，统计时回退到节点 id 单算，互不影响。
 	Fingerprint string `json:"fingerprint,omitempty" neo4j:"fingerprint"`
