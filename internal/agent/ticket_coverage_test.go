@@ -12,30 +12,30 @@ var vulnTypeToCategoryCases = []struct {
 	in   string // 漏洞类型
 	want string // 期望语义类别
 }{
-	{"", ""},                                    // 空类型：非漏洞行，不参与判定
-	{"weak_password", catWeakPassword},           // 弱口令
-	{"sensitive_file", catDataLeak},             // 数据泄露
-	{"sensitive_info", catDataLeak},             // 数据泄露
-	{"sqli", catInjection},                      // 注入类
-	{"command_injection", catInjection},         // 注入类
-	{"ssti", catInjection},                      // 注入类
-	{"xxe", catInjection},                       // 注入类
-	{"idor", catAuthConfig},                     // 权限与配置错误
-	{"broken_auth", catAuthConfig},              // 权限与配置错误
-	{"misconfiguration", catAuthConfig},         // 权限与配置错误
-	{"ssrf", catAuthConfig},                     // 权限与配置错误
-	{"vulnerable_component", catComponent},       // 依赖组件漏洞
-	{"logic", catLogic},                         // 逻辑缺陷
-	{"file_upload", catLogic},                   // 逻辑缺陷
-	{"deserialization", catLogic},               // 逻辑缺陷
-	{"info_disclosure", catInfoLeak},            // 信息泄露
-	{"path_traversal", catInfoLeak},             // 信息泄露
-	{"directory_listing", catInfoLeak},          // 信息泄露
-	{"webshell", catWebshell},                   // Webshell / 后门（独立类别，不并入数据泄露）
-	{"backdoor", catWebshell},                   // 后门
-	{"malicious_file", catWebshell},             // 恶意文件
-	{"totally_new_type_2026", catOther},         // 未知 / 新增类型 -> 兜底 other（禁止漏单）
-	{"some_weird_cve_thing", catOther},          // 未知 / 新增类型 -> 兜底 other
+	{"", ""},                               // 空类型：非漏洞行，不参与判定
+	{"weak_password", catWeakPassword},     // 弱口令
+	{"sensitive_file", catDataLeak},        // 数据泄露
+	{"sensitive_info", catDataLeak},        // 数据泄露
+	{"sqli", catInjection},                 // 注入类
+	{"command_injection", catInjection},    // 注入类
+	{"ssti", catInjection},                 // 注入类
+	{"xxe", catInjection},                  // 注入类
+	{"idor", catAuthConfig},                // 权限与配置错误
+	{"broken_auth", catAuthConfig},         // 权限与配置错误
+	{"misconfiguration", catAuthConfig},    // 权限与配置错误
+	{"ssrf", catAuthConfig},                // 权限与配置错误
+	{"vulnerable_component", catComponent}, // 依赖组件漏洞
+	{"logic", catLogic},                    // 逻辑缺陷
+	{"file_upload", catLogic},              // 逻辑缺陷
+	{"deserialization", catLogic},          // 逻辑缺陷
+	{"info_disclosure", catInfoLeak},       // 信息泄露
+	{"path_traversal", catInfoLeak},        // 信息泄露
+	{"directory_listing", catInfoLeak},     // 信息泄露
+	{"webshell", catWebshell},              // Webshell / 后门（独立类别，不并入数据泄露）
+	{"backdoor", catWebshell},              // 后门
+	{"malicious_file", catWebshell},        // 恶意文件
+	{"totally_new_type_2026", catOther},    // 未知 / 新增类型 -> 兜底 other（禁止漏单）
+	{"some_weird_cve_thing", catOther},     // 未知 / 新增类型 -> 兜底 other
 }
 
 // TestVulnTypeToCategoryCoverage 验证分类体系：已知类型归位、未知类型兜底、空类型不参与。
@@ -169,13 +169,13 @@ func TestTicketFingerprint(t *testing.T) {
 // TestTicketCategoryKeywordFallback 验证无 VulnType 时按关键词也能归类到新增类别（去重判定需要）。
 func TestTicketCategoryKeywordFallback(t *testing.T) {
 	cases := map[string]string{
-		"发现 SQL 注入漏洞":         catInjection,
-		"存在越权访问/权限配置错误":     catAuthConfig,
-		"依赖组件存在已知漏洞":        catComponent,
-		"业务逻辑缺陷导致重复下单":      catLogic,
-		"目录遍历导致信息泄露":        catInfoLeak,
-		"Webshell 后门文件落地":       catWebshell,
-		"未知类型漏洞 xzy":          catOther,
+		"发现 SQL 注入漏洞":     catInjection,
+		"存在越权访问/权限配置错误":   catAuthConfig,
+		"依赖组件存在已知漏洞":      catComponent,
+		"业务逻辑缺陷导致重复下单":    catLogic,
+		"目录遍历导致信息泄露":      catInfoLeak,
+		"Webshell 后门文件落地": catWebshell,
+		"未知类型漏洞 xzy":      catOther,
 	}
 	for title, want := range cases {
 		tk := &models.Ticket{Title: title}

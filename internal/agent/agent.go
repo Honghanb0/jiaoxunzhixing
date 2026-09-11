@@ -169,27 +169,27 @@ func (a *Agent) Run(ctx context.Context, task *Task, provider string) {
 				_ = a.repo.AppendStep(task.ID, step)
 				continue
 			}
-		// 纯推理文本（不含 <tool_calls> 块）：记为推理步骤并继续。
-		// 注意：首轮纯文本通常只是模型在「思考 / 预告下一步」，不应直接收尾——
-		// 只有「连续两轮」纯文本（模型确实不再打算调用工具）才视为已给出结论，
-		// 此时再做硬性交付校验并收尾。此前在首轮纯文本即 finalize，导致模型刚开口就被
-		// 误判为已完成（task dc376848：轮次 0、零步骤却 completed）。
-		step := &Step{ID: uuid.New().String(), Name: "reasoning", Status: StepDone, Detail: "模型返回内容（非标准工具调用）", Result: truncate(content, 500)}
-		task.appendStep(*step)
-		_ = a.repo.AppendStep(task.ID, step)
-		consecutiveNoToolRounds++
-		if consecutiveNoToolRounds >= 2 {
-			// 收尾前硬性交付校验：未满足则退回补齐（不计入实际轮询次数）。
-			switch a.enforceDeliverables(task) {
-			case enforceNudged:
-				continue
-			case enforceSafetyValveFired:
+			// 纯推理文本（不含 <tool_calls> 块）：记为推理步骤并继续。
+			// 注意：首轮纯文本通常只是模型在「思考 / 预告下一步」，不应直接收尾——
+			// 只有「连续两轮」纯文本（模型确实不再打算调用工具）才视为已给出结论，
+			// 此时再做硬性交付校验并收尾。此前在首轮纯文本即 finalize，导致模型刚开口就被
+			// 误判为已完成（task dc376848：轮次 0、零步骤却 completed）。
+			step := &Step{ID: uuid.New().String(), Name: "reasoning", Status: StepDone, Detail: "模型返回内容（非标准工具调用）", Result: truncate(content, 500)}
+			task.appendStep(*step)
+			_ = a.repo.AppendStep(task.ID, step)
+			consecutiveNoToolRounds++
+			if consecutiveNoToolRounds >= 2 {
+				// 收尾前硬性交付校验：未满足则退回补齐（不计入实际轮询次数）。
+				switch a.enforceDeliverables(task) {
+				case enforceNudged:
+					continue
+				case enforceSafetyValveFired:
+					return
+				}
+				a.finalize(task, TaskStatusCompleted, content)
 				return
 			}
-			a.finalize(task, TaskStatusCompleted, content)
-			return
-		}
-		continue
+			continue
 		}
 		if len(calls) == 0 {
 			// 无工具调用、纯文本：记为推理步骤。首轮纯文本只是模型在「思考 / 预告下一步」，
@@ -1282,7 +1282,7 @@ func (a *Agent) createTicketStepCovers(s Step, targetDomains []string, targetHos
 		hay := strings.ToLower(getString(args, "title") + " " + getString(args, "vuln_name") + " " + getString(args, "description"))
 		if containsAny(hay, []string{"弱口令", "弱密码", "weak", "默认口令", "default password", "口令"}) {
 			cat = catWeakPassword
-		} else 		if containsAny(hay, []string{"数据泄露", "数据泄漏", "敏感", "sensitive", "泄露", "信息泄露", "备份文件", "源码泄露", "源码泄漏", "配置文件", ".git", "目录遍历", "敏感文件", "敏感信息"}) {
+		} else if containsAny(hay, []string{"数据泄露", "数据泄漏", "敏感", "sensitive", "泄露", "信息泄露", "备份文件", "源码泄露", "源码泄漏", "配置文件", ".git", "目录遍历", "敏感文件", "敏感信息"}) {
 			cat = catDataLeak
 		} else if containsAny(hay, []string{"webshell", "后门", "木马", "恶意文件", "backdoor", "malicious", "webshell文件"}) {
 			cat = catWebshell

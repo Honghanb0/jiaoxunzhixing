@@ -59,10 +59,10 @@ func registerWeakPassTools(reg *ToolRegistry, d Deps) {
 		description: "对单条「用户名+口令」做有效性验证（确认该凭据能否登录目标服务）。" +
 			"用于复验弱口令扫描的命中项，或人工指定凭据的即时判定。返回 authenticated 布尔与所用 service/target/username。",
 		schema: map[string]any{"type": "object", "properties": map[string]any{
-			"target":    map[string]any{"type": "string", "description": "目标 host 或 host:port"},
-			"service":   map[string]any{"type": "string", "description": "服务类型：ssh/ftp/pop3/smtp/redis/http"},
-			"username":  map[string]any{"type": "string"},
-			"password":  map[string]any{"type": "string"},
+			"target":      map[string]any{"type": "string", "description": "目标 host 或 host:port"},
+			"service":     map[string]any{"type": "string", "description": "服务类型：ssh/ftp/pop3/smtp/redis/http"},
+			"username":    map[string]any{"type": "string"},
+			"password":    map[string]any{"type": "string"},
 			"timeout_sec": map[string]any{"type": "integer", "description": "超时秒数（1~30，默认 5）"},
 		}},
 		fn: func(ctx context.Context, args map[string]any) (string, error) {
@@ -171,13 +171,13 @@ func weakPasswordScan(ctx context.Context, args map[string]any) (string, error) 
 	}
 	// 精简输出：found 凭据全量返回（通常很少），errors 已在上限内截断
 	out := map[string]any{
-		"target":          res.Target,
-		"service":         res.Service,
-		"attempts":        res.Attempts,
-		"found":          res.Found,
-		"found_count":     len(res.Found),
-		"errors_sample":   res.Errors,
-		"elapsed_sec":     res.ElapsedSec,
+		"target":           res.Target,
+		"service":          res.Service,
+		"attempts":         res.Attempts,
+		"found":            res.Found,
+		"found_count":      len(res.Found),
+		"errors_sample":    res.Errors,
+		"elapsed_sec":      res.ElapsedSec,
 		"stopped_on_first": res.StoppedOnFirst,
 	}
 	return toJSON(out), nil

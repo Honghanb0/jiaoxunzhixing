@@ -40,10 +40,10 @@ const (
 type StepStatus string
 
 const (
-	StepPending  StepStatus = "pending"
-	StepRunning  StepStatus = "running"
-	StepDone     StepStatus = "done"
-	StepFailed   StepStatus = "failed"
+	StepPending StepStatus = "pending"
+	StepRunning StepStatus = "running"
+	StepDone    StepStatus = "done"
+	StepFailed  StepStatus = "failed"
 )
 
 // Message 任务对话中的一条消息（角色 + 内容）。

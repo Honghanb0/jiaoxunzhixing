@@ -9,15 +9,15 @@ import "strings"
 //  2. 仅当 type 为空（非漏洞行，如 URL 节点）时才返回 ""，不参与建单判定。
 //  3. 类别集合与扫描器实际产出对齐（见 detector.go ruleIDToVulnType）。
 const (
-	catWeakPassword = "weak_password"  // 弱口令 / 默认口令
-	catDataLeak     = "data_leak"      // 数据泄露（敏感文件 / 敏感信息）
-	catInjection    = "injection"      // 注入类：SQLi / 命令注入 / SSTI / XXE
-	catAuthConfig   = "auth_config"    // 权限与配置错误：越权 / 认证缺陷 / 配置不当 / SSRF
-	catComponent    = "component"      // 依赖组件漏洞（已知漏洞组件）
-	catLogic        = "logic"          // 逻辑缺陷（业务逻辑 / 文件上传 / 反序列化 ...）
-	catInfoLeak     = "info_leak"      // 信息泄露（目录遍历 / 报错泄露 / 源码 / 备份文件）
-	catWebshell     = "webshell"       // Webshell / 后门 / 木马 / 恶意文件（独立于数据泄露，避免与敏感文件混淆）
-	catOther        = "other"          // 未归类 / 未知类型（兜底，绝不静默跳过）
+	catWeakPassword = "weak_password" // 弱口令 / 默认口令
+	catDataLeak     = "data_leak"     // 数据泄露（敏感文件 / 敏感信息）
+	catInjection    = "injection"     // 注入类：SQLi / 命令注入 / SSTI / XXE
+	catAuthConfig   = "auth_config"   // 权限与配置错误：越权 / 认证缺陷 / 配置不当 / SSRF
+	catComponent    = "component"     // 依赖组件漏洞（已知漏洞组件）
+	catLogic        = "logic"         // 逻辑缺陷（业务逻辑 / 文件上传 / 反序列化 ...）
+	catInfoLeak     = "info_leak"     // 信息泄露（目录遍历 / 报错泄露 / 源码 / 备份文件）
+	catWebshell     = "webshell"      // Webshell / 后门 / 木马 / 恶意文件（独立于数据泄露，避免与敏感文件混淆）
+	catOther        = "other"         // 未归类 / 未知类型（兜底，绝不静默跳过）
 )
 
 // vulnTypeToCategory 将具体漏洞类型映射到语义建单类别。

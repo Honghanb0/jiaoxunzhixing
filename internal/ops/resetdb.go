@@ -20,8 +20,8 @@ type ResetOptions struct {
 	Username  string
 	Password  string
 	Database  string
-	Confirm   bool // 真正执行删除
-	DryRun    bool // 仅打印将要执行的操作
+	Confirm   bool   // 真正执行删除
+	DryRun    bool   // 仅打印将要执行的操作
 	ConfigDir string // config.yaml 所在目录（空表示当前目录）
 }
 

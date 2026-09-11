@@ -158,13 +158,13 @@ func (h *ScanHandler) ListRules(c *gin.Context) {
 
 	rules := ruleEngine.ListRules()
 	type RuleSummary struct {
-		ID            string `json:"id"`
-		Name          string `json:"name"`
-		NameCN        string `json:"name_cn"`
-		OWASPCategory string `json:"owasp_category"`
-		CVSSSeverity  string `json:"cvss_severity"`
-		CVSSScore     float64 `json:"cvss_score"`
-		CWEID         string `json:"cwe_id"`
+		ID            string   `json:"id"`
+		Name          string   `json:"name"`
+		NameCN        string   `json:"name_cn"`
+		OWASPCategory string   `json:"owasp_category"`
+		CVSSSeverity  string   `json:"cvss_severity"`
+		CVSSScore     float64  `json:"cvss_score"`
+		CWEID         string   `json:"cwe_id"`
 		Methods       []string `json:"methods"`
 	}
 

@@ -150,10 +150,10 @@ func TestCrawler_Cancel(t *testing.T) {
 
 	withTimeout(t, 20*time.Second, "取消后的 Start()", func() {
 		ctx := &CrawlContext{
-			Ctx:       cancelCtx,
-			Domain:    &Domain{Name: "127.0.0.1", MaxDepth: 9, MaxPages: 200, Concurrency: 4},
-			StartURL:  srv.URL + "/",
-			Pages:     make([]*PageInfo, 0),
+			Ctx:      cancelCtx,
+			Domain:   &Domain{Name: "127.0.0.1", MaxDepth: 9, MaxPages: 200, Concurrency: 4},
+			StartURL: srv.URL + "/",
+			Pages:    make([]*PageInfo, 0),
 		}
 		// 取消后应尽快返回；结果数量不做断言
 		if err := c.Start(ctx); err != nil {

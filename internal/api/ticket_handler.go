@@ -33,8 +33,8 @@ type CreateTicketRequest struct {
 }
 
 type UpdateTicketRequest struct {
-	Status    string `json:"status"`
-	Assignee  string `json:"assignee"`
+	Status   string `json:"status"`
+	Assignee string `json:"assignee"`
 }
 
 type AddNoteRequest struct {
@@ -147,7 +147,7 @@ func (h *TicketHandler) Create(c *gin.Context) {
 
 	c.JSON(http.StatusCreated, gin.H{
 		"message": "工单创建成功",
-		"ticket": ticket,
+		"ticket":  ticket,
 	})
 }
 
@@ -201,9 +201,9 @@ func (h *TicketHandler) Update(c *gin.Context) {
 
 	if req.Status != "" {
 		if req.Status != models.TicketStatusPending &&
-		   req.Status != models.TicketStatusConfirmed &&
-		   req.Status != models.TicketStatusExcluded &&
-		   req.Status != models.TicketStatusResolved {
+			req.Status != models.TicketStatusConfirmed &&
+			req.Status != models.TicketStatusExcluded &&
+			req.Status != models.TicketStatusResolved {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "无效的工单状态"})
 			return
 		}
@@ -224,7 +224,7 @@ func (h *TicketHandler) Update(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "工单更新成功",
-		"ticket": ticket,
+		"ticket":  ticket,
 	})
 }
 
@@ -248,7 +248,7 @@ func (h *TicketHandler) AddNote(c *gin.Context) {
 	ticket, _ := h.ticketRepo.GetByID(id)
 	c.JSON(http.StatusOK, gin.H{
 		"message": "备注添加成功",
-		"ticket": ticket,
+		"ticket":  ticket,
 	})
 }
 

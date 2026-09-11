@@ -31,34 +31,34 @@ var embeddedRulesFS embed.FS
 
 // VulnRule 单条漏洞规则
 type VulnRule struct {
-	ID             string          `yaml:"id"`
-	Name           string          `yaml:"name"`
-	NameCN         string          `yaml:"name_cn"`
-	Description    string          `yaml:"description"`
-	OWASPCategory  string          `yaml:"owasp_category"`
-	OWASPSubcat    string          `yaml:"owasp_subcategory"`
-	CWEID          string          `yaml:"cwe_id"`
-	CVSS           CVSSInfo        `yaml:"cvss"`
-	Detection      DetectionConfig `yaml:"detection"`
-	PoC            PoCConfig       `yaml:"poc"`
-	Remediation    RemediationInfo `yaml:"remediation"`
+	ID              string          `yaml:"id"`
+	Name            string          `yaml:"name"`
+	NameCN          string          `yaml:"name_cn"`
+	Description     string          `yaml:"description"`
+	OWASPCategory   string          `yaml:"owasp_category"`
+	OWASPSubcat     string          `yaml:"owasp_subcategory"`
+	CWEID           string          `yaml:"cwe_id"`
+	CVSS            CVSSInfo        `yaml:"cvss"`
+	Detection       DetectionConfig `yaml:"detection"`
+	PoC             PoCConfig       `yaml:"poc"`
+	Remediation     RemediationInfo `yaml:"remediation"`
 	KnowledgeSource KnowledgeSource `yaml:"knowledge_source"`
 }
 
 // CVSSInfo CVSS 3.1 评分信息
 type CVSSInfo struct {
-	Vector     string  `yaml:"vector"`
-	BaseScore  float64 `yaml:"base_score"`
-	Severity   string  `yaml:"severity"` // critical/high/medium/low
+	Vector    string  `yaml:"vector"`
+	BaseScore float64 `yaml:"base_score"`
+	Severity  string  `yaml:"severity"` // critical/high/medium/low
 }
 
 // DetectionConfig 检测配置
 type DetectionConfig struct {
-	Methods              []string           `yaml:"methods"`
-	DASTSignals          DASTSignals        `yaml:"dast_signals"`
-	SASTPatterns         []SASTPattern      `yaml:"sast_patterns"`
-	MultiLayer           MultiLayerConfig   `yaml:"multi_layer"`
-	FalsePositiveFilters []FPFilter         `yaml:"false_positive_filters"`
+	Methods              []string         `yaml:"methods"`
+	DASTSignals          DASTSignals      `yaml:"dast_signals"`
+	SASTPatterns         []SASTPattern    `yaml:"sast_patterns"`
+	MultiLayer           MultiLayerConfig `yaml:"multi_layer"`
+	FalsePositiveFilters []FPFilter       `yaml:"false_positive_filters"`
 }
 
 // DASTSignals DAST 检测信号（按特异性分层）
@@ -100,24 +100,24 @@ type SASTPattern struct {
 
 // MultiLayerConfig 多层确认配置
 type MultiLayerConfig struct {
-	Enabled                  bool `yaml:"enabled"`
-	MinSignals               int  `yaml:"min_signals"`
-	HighSpecificitySkipsMin  bool `yaml:"high_specificity_skips_min"`
+	Enabled                 bool `yaml:"enabled"`
+	MinSignals              int  `yaml:"min_signals"`
+	HighSpecificitySkipsMin bool `yaml:"high_specificity_skips_min"`
 }
 
 // FPFilter 误报过滤器
 type FPFilter struct {
-	Filter          string `yaml:"filter"`
-	Condition       string `yaml:"condition"`
-	Action          string `yaml:"action"` // discard / downgrade
+	Filter           string `yaml:"filter"`
+	Condition        string `yaml:"condition"`
+	Action           string `yaml:"action"` // discard / downgrade
 	TargetConfidence string `yaml:"target_confidence"`
 }
 
 // PoCConfig PoC 生成配置
 type PoCConfig struct {
-	Enabled         bool          `yaml:"enabled"`
-	RequestTemplate string        `yaml:"request_template"`
-	Payloads        []PoCPayload  `yaml:"payloads"`
+	Enabled         bool           `yaml:"enabled"`
+	RequestTemplate string         `yaml:"request_template"`
+	Payloads        []PoCPayload   `yaml:"payloads"`
 	Verification    []Verification `yaml:"verification"`
 }
 
@@ -138,16 +138,16 @@ type Verification struct {
 
 // RemediationInfo 修复建议
 type RemediationInfo struct {
-	Priority  string   `yaml:"priority"`
-	Summary   string   `yaml:"summary"`
-	Details   []string `yaml:"details"`
+	Priority   string   `yaml:"priority"`
+	Summary    string   `yaml:"summary"`
+	Details    []string `yaml:"details"`
 	References []string `yaml:"references"`
 }
 
 // KnowledgeSource 知识来源
 type KnowledgeSource struct {
-	File        string `yaml:"file"`
-	Methodology string `yaml:"methodology"`
+	File         string `yaml:"file"`
+	Methodology  string `yaml:"methodology"`
 	LastReviewed string `yaml:"last_reviewed"`
 }
 
@@ -290,13 +290,13 @@ func (re *RuleEngine) RulesByMethod(method string) []*VulnRule {
 
 // MatchResult 规则匹配结果
 type MatchResult struct {
-	Rule           *VulnRule
-	MatchedSignals []Signal
-	Confidence     float64  // 0.0 ~ 1.0
+	Rule            *VulnRule
+	MatchedSignals  []Signal
+	Confidence      float64 // 0.0 ~ 1.0
 	ConfidenceLevel string  // high / medium / low
-	ShouldReport   bool
-	Evidence       string  // 匹配证据
-	PoCPayload     string  // 推荐的 PoC payload
+	ShouldReport    bool
+	Evidence        string // 匹配证据
+	PoCPayload      string // 推荐的 PoC payload
 }
 
 // MatchDAST 对 PageInfo 执行 DAST 规则匹配
@@ -591,7 +591,7 @@ func ParseCVSSVector(vector string) (baseScore float64, severity string) {
 	if metrics["S"] == "U" {
 		impact = 6.42 * iss
 	} else {
-		impact = 7.52 * (iss - 0.029) - 3.25 * (iss - 0.02)
+		impact = 7.52*(iss-0.029) - 3.25*(iss-0.02)
 	}
 
 	exploitability := 8.22 * av * ac * pr * ui

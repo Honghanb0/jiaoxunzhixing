@@ -41,12 +41,12 @@ func NewInspectionHandler(
 
 type createRuleRequest struct {
 	Name              string   `json:"name" binding:"required"`
-	DomainID          string   `json:"domain_id"`          // 单资产（向后兼容）
-	DomainIDs         []string `json:"domain_ids"`         // 多资产绑定（优先于 domain_id）
-	Enabled           *bool    `json:"enabled"`            // 缺省=true（启用）
+	DomainID          string   `json:"domain_id"`  // 单资产（向后兼容）
+	DomainIDs         []string `json:"domain_ids"` // 多资产绑定（优先于 domain_id）
+	Enabled           *bool    `json:"enabled"`    // 缺省=true（启用）
 	Schedule          string   `json:"schedule" binding:"required"`
 	SeverityThreshold string   `json:"severity_threshold"`
-	RunScan           *bool    `json:"run_scan"`           // 缺省=true（先扫描）
+	RunScan           *bool    `json:"run_scan"` // 缺省=true（先扫描）
 	RetryCount        int      `json:"retry_count"`
 	RetryBackoffSec   int      `json:"retry_backoff_sec"`
 	AlertOnFailure    *bool    `json:"alert_on_failure"`

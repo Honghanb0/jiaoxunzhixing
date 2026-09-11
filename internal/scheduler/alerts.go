@@ -62,14 +62,14 @@ func (s *AlertService) sendToChannel(alert *models.Alert, channel config.AlertCh
 
 func (s *AlertService) sendWebhook(alert *models.Alert, webhookURL string) error {
 	payload := map[string]interface{}{
-		"alert_id":   alert.ID,
-		"title":      alert.Title,
-		"content":    alert.Content,
-		"severity":   alert.Severity,
-		"domain_id":  alert.DomainID,
-		"type":       alert.Type,
-		"status":     alert.Status,
-		"timestamp":  time.Now().Format(time.RFC3339),
+		"alert_id":  alert.ID,
+		"title":     alert.Title,
+		"content":   alert.Content,
+		"severity":  alert.Severity,
+		"domain_id": alert.DomainID,
+		"type":      alert.Type,
+		"status":    alert.Status,
+		"timestamp": time.Now().Format(time.RFC3339),
 	}
 
 	jsonPayload, err := json.Marshal(payload)

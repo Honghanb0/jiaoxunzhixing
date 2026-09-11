@@ -201,7 +201,7 @@ func (d *Detector) detectXSS(page *PageInfo) *models.Vulnerability {
 	if strings.Contains(urlLower, "javascript:") || strings.Contains(urlLower, "vbscript:") {
 		return &models.Vulnerability{
 			Type: "xss", Name: "Cross-Site Scripting (XSS)", Severity: "medium",
-			Confidence: "high",
+			Confidence:  "high",
 			Description: "页面或链接中包含 javascript:/vbscript: 协议，可被用于脚本注入",
 			Evidence:    "URL 包含 javascript:/vbscript: 协议", URL: page.URL,
 			Remediation: "避免拼接用户输入到 URL；对输出做 HTML 转义，设置 Content-Security-Policy",
@@ -232,7 +232,7 @@ func (d *Detector) detectXSS(page *PageInfo) *models.Vulnerability {
 			if re.MatchString(handlerValue) {
 				return &models.Vulnerability{
 					Type: "xss", Name: "Cross-Site Scripting (XSS)", Severity: "medium",
-					Confidence: "high",
+					Confidence:  "high",
 					Description: fmt.Sprintf("检测到内联事件处理器 %s，其值包含高危脚本行为", m[1]),
 					Evidence:    fmt.Sprintf("事件处理器 %s=\"%s\"", m[1], truncate(handlerValue, 80)), URL: page.URL,
 					Remediation: "使用 addEventListener 绑定事件；对用户可控属性做转义；设置 CSP",
@@ -272,7 +272,7 @@ func (d *Detector) detectXSS(page *PageInfo) *models.Vulnerability {
 			}
 			return &models.Vulnerability{
 				Type: "xss", Name: "Cross-Site Scripting (XSS)", Severity: "medium",
-				Confidence: confidence,
+				Confidence:  confidence,
 				Description: fmt.Sprintf("页面脚本包含 %d 个可疑信号（%s），存在 XSS 或数据泄露风险", signals, strings.Join(signalNames, "、")),
 				Evidence:    fmt.Sprintf("脚本块命中 %d 个可疑信号: %s", signals, strings.Join(signalNames, ", ")), URL: page.URL,
 				Remediation: "审查脚本来源；移除不必要的 document.cookie/eval 调用；设置 CSP 限制脚本执行",
@@ -348,7 +348,7 @@ func (d *Detector) detectSQLInjection(page *PageInfo) *models.Vulnerability {
 
 	return &models.Vulnerability{
 		Type: "sqli", Name: "Potential SQL Injection", Severity: "high",
-		Confidence: confidence,
+		Confidence:  confidence,
 		Description: fmt.Sprintf("URL 参数值包含 %d 个 SQL 注入特征", len(matchedSignals)),
 		Evidence:    fmt.Sprintf("命中特征: %s", strings.Join(matchedSignals, ", ")), URL: page.URL,
 		Parameter:   parsed.RawQuery,
@@ -431,7 +431,7 @@ func (d *Detector) detectSensitiveFiles(page *PageInfo) []*models.Vulnerability 
 		}
 		vulns = append(vulns, &models.Vulnerability{
 			Type: "sensitive_file", Name: "Sensitive File Exposure", Severity: "high",
-			Confidence: confidence,
+			Confidence:  confidence,
 			Description: best.desc,
 			Evidence:    fmt.Sprintf("HTTP 200 | URL 包含敏感路径: %s | 内容长度: %d", best.path, len(page.RawContent)), URL: page.URL,
 			Remediation: "将敏感文件移出 Web 根目录，或通过 Web 服务器拒绝访问",
@@ -463,7 +463,7 @@ func (d *Detector) detectPageTampering(page *PageInfo) *models.Vulnerability {
 		}
 		return &models.Vulnerability{
 			Type: "tampering", Name: "Hidden External Iframe", Severity: "high",
-			Confidence: "high",
+			Confidence:  "high",
 			Description: "页面包含指向外部域名的 iframe，疑似点击劫持或钓鱼",
 			Evidence:    fmt.Sprintf("外部 iframe: %s", m[1]), URL: page.URL,
 			Remediation: "确认 iframe 来源是否可信；对不可信来源移除并设置 X-Frame-Options",
@@ -490,7 +490,7 @@ func (d *Detector) detectPageTampering(page *PageInfo) *models.Vulnerability {
 		if re.MatchString(lower) {
 			return &models.Vulnerability{
 				Type: "tampering", Name: "Page Tampering / Webshell Detected", Severity: "high",
-				Confidence: "high",
+				Confidence:  "high",
 				Description: "检测到疑似 Webshell 或网页篡改特征",
 				Evidence:    fmt.Sprintf("匹配到特征: %s", p), URL: page.URL,
 				Remediation: "立即隔离并审计页面源码，清除后门，排查服务器入侵途径",
@@ -518,7 +518,7 @@ func (d *Detector) detectMalwareLinks(page *PageInfo) []*models.Vulnerability {
 			if strings.Contains(u.Host, kw) {
 				vulns = append(vulns, &models.Vulnerability{
 					Type: "malicious_link", Name: "Suspicious External Link", Severity: "low",
-					Confidence: "high",
+					Confidence:  "high",
 					Description: fmt.Sprintf("外链主机疑似包含 %q 关键词", kw),
 					Evidence:    href, URL: page.URL,
 					Remediation: "核实链接安全性，必要时移除",

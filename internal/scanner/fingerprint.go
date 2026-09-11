@@ -18,31 +18,31 @@ var embeddedFingerprints []byte
 // FingerprintRule 统一化的组件/服务指纹规则（与 wanpinglingtan 指纹库兼容，已归一化）。
 // 来源通过 Source 字段标注（wanpinglingtan:fingerprint_db / high_risk / fingerprint_hub / ext）。
 type FingerprintRule struct {
-	ID          string                  `json:"id"`
-	ProductCN   string                  `json:"product_cn"`
-	ProductEN   string                  `json:"product_en"`
-	Category    string                  `json:"category"`
-	Vendor      string                  `json:"vendor"`
-	RiskLevel   string                  `json:"risk_level"` // Critical|High|Medium|Low|Info
-	CVSSBase    float64                 `json:"cvss_base"`
-	Priority    int                     `json:"priority"`
-	MatchType   string                  `json:"match_type"` // or|and
-	MatchRules  FingerprintMatchRules    `json:"match_rules"`
-	VerifyPaths []string                `json:"verify_paths"`
-	Vulnerabilities []CriticalVulnerability `json:"critical_vulnerabilities"`
-	AffectedVersions string             `json:"affected_versions"`
-	Remediation string                  `json:"remediation"`
-	Source      string                  `json:"source"`
+	ID               string                  `json:"id"`
+	ProductCN        string                  `json:"product_cn"`
+	ProductEN        string                  `json:"product_en"`
+	Category         string                  `json:"category"`
+	Vendor           string                  `json:"vendor"`
+	RiskLevel        string                  `json:"risk_level"` // Critical|High|Medium|Low|Info
+	CVSSBase         float64                 `json:"cvss_base"`
+	Priority         int                     `json:"priority"`
+	MatchType        string                  `json:"match_type"` // or|and
+	MatchRules       FingerprintMatchRules   `json:"match_rules"`
+	VerifyPaths      []string                `json:"verify_paths"`
+	Vulnerabilities  []CriticalVulnerability `json:"critical_vulnerabilities"`
+	AffectedVersions string                  `json:"affected_versions"`
+	Remediation      string                  `json:"remediation"`
+	Source           string                  `json:"source"`
 }
 
 // FingerprintMatchRules 命中维度（任意维度命中即算命中，match_type=or）。
 type FingerprintMatchRules struct {
-	HeaderServer  []string `json:"header_server"`  // Server 响应头包含
-	HeaderCustom  []string `json:"header_custom"`  // 其它响应头正则（大小写不敏感，作用于 "Name: Value"）
-	BodyKeywords  []string `json:"body_keywords"`  // 响应体包含
+	HeaderServer   []string `json:"header_server"`   // Server 响应头包含
+	HeaderCustom   []string `json:"header_custom"`   // 其它响应头正则（大小写不敏感，作用于 "Name: Value"）
+	BodyKeywords   []string `json:"body_keywords"`   // 响应体包含
 	CookieKeywords []string `json:"cookie_keywords"` // Set-Cookie 包含
-	TitleKeywords []string `json:"title_keywords"` // <title> 包含
-	PathKeywords  []string `json:"path_keywords"`  // 当前页面路径包含（弱命中，仅供参考）
+	TitleKeywords  []string `json:"title_keywords"`  // <title> 包含
+	PathKeywords   []string `json:"path_keywords"`   // 当前页面路径包含（弱命中，仅供参考）
 }
 
 // CriticalVulnerability 关联的真实 CVE（仅收录公开确认项）。

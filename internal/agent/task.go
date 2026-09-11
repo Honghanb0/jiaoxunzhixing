@@ -49,7 +49,7 @@ func (r *taskRepo) Create(t *Task) error {
 	_, err := session.Run(query, map[string]any{
 		"id": t.ID, "goal": t.Goal, "status": string(t.Status),
 		"provider": t.Provider, "model": t.Model, "result": t.Result, "error": t.Error,
-		"contract": marshalContract(t.Contract),
+		"contract":   marshalContract(t.Contract),
 		"created_at": t.CreatedAt.Format(time.RFC3339), "updated_at": t.UpdatedAt.Format(time.RFC3339),
 	})
 	return err
@@ -67,7 +67,7 @@ func (r *taskRepo) Update(t *Task) error {
 	_, err := session.Run(query, map[string]any{
 		"id": t.ID, "status": string(t.Status), "result": t.Result, "error": t.Error,
 		"turns": t.Turns, "model": t.Model, "contract": marshalContract(t.Contract),
-		"updated_at": t.UpdatedAt.Format(time.RFC3339),
+		"updated_at":   t.UpdatedAt.Format(time.RFC3339),
 		"completed_at": nullableTime(t.CompletedAt),
 	})
 	return err

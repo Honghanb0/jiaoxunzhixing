@@ -67,9 +67,9 @@ type Entry struct {
 const maxEntries = 5000
 
 var (
-	mu      sync.Mutex
-	buf     []Entry
-	seq     int64
+	mu        sync.Mutex
+	buf       []Entry
+	seq       int64
 	installed bool
 )
 

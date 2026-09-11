@@ -27,13 +27,13 @@ type FoundCred struct {
 
 // ScanResult 一次弱口令扫描的结果。
 type ScanResult struct {
-	Target         string       `json:"target"`
-	Service        string       `json:"service"`
-	Attempts       int          `json:"attempts"`
-	Found          []FoundCred  `json:"found"`
-	Errors         []string     `json:"errors,omitempty"`
-	ElapsedSec     float64      `json:"elapsed_sec"`
-	StoppedOnFirst bool         `json:"stopped_on_first"`
+	Target         string      `json:"target"`
+	Service        string      `json:"service"`
+	Attempts       int         `json:"attempts"`
+	Found          []FoundCred `json:"found"`
+	Errors         []string    `json:"errors,omitempty"`
+	ElapsedSec     float64     `json:"elapsed_sec"`
+	StoppedOnFirst bool        `json:"stopped_on_first"`
 }
 
 // ScanOptions 弱口令扫描参数。
@@ -89,11 +89,11 @@ func Scan(ctx context.Context, opts ScanOptions) (*ScanResult, error) {
 
 	res := &ScanResult{Target: opts.Target, Service: opts.Service}
 	var (
-		mu     sync.Mutex
-		sem    = make(chan struct{}, concurrency)
-		wg     sync.WaitGroup
+		mu      sync.Mutex
+		sem     = make(chan struct{}, concurrency)
+		wg      sync.WaitGroup
 		stopped int32
-		start  = time.Now()
+		start   = time.Now()
 	)
 
 	for _, t := range tasks {

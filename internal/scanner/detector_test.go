@@ -12,9 +12,9 @@ func TestDetectPageTampering_ExternalIframe(t *testing.T) {
 
 	// 外域 iframe 应被识别
 	page := &PageInfo{
-		URL:         "https://example.com/index.html",
-		RawContent:  `<html><body><iframe src="https://evil.example.net/frame" width="0" height="0"></iframe></body></html>`,
-		StatusCode:  200,
+		URL:        "https://example.com/index.html",
+		RawContent: `<html><body><iframe src="https://evil.example.net/frame" width="0" height="0"></iframe></body></html>`,
+		StatusCode: 200,
 	}
 	v := d.detectPageTampering(page)
 	if v == nil {
@@ -31,9 +31,9 @@ func TestDetectPageTampering_SameOriginIframeNotFlagged(t *testing.T) {
 
 	// 同源 iframe 不应误报
 	page := &PageInfo{
-		URL:         "https://example.com/index.html",
-		RawContent:  `<html><body><iframe src="https://example.com/widget"></iframe></body></html>`,
-		StatusCode:  200,
+		URL:        "https://example.com/index.html",
+		RawContent: `<html><body><iframe src="https://example.com/widget"></iframe></body></html>`,
+		StatusCode: 200,
 	}
 	if v := d.detectPageTampering(page); v != nil {
 		t.Errorf("同源 iframe 不应被标记为外部 iframe，实际检出: %s", v.Evidence)

@@ -188,7 +188,7 @@ func (r *UserRepository) nodeToUser(node neo4j.Node) *models.User {
 		ID: getStr(props, "id"), Username: getStr(props, "username"),
 		PasswordHash: getStr(props, "password_hash"), Role: getStr(props, "role"),
 		RoleLevel: roleLevel,
-		Email: getStr(props, "email"),
+		Email:     getStr(props, "email"),
 		CreatedAt: getTimeVal(props, "created_at"), UpdatedAt: getTimeVal(props, "updated_at"),
 	}
 }

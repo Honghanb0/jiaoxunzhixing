@@ -230,7 +230,7 @@ func (r *InspectionRecordRepository) Create(rec *models.InspectionRecord) error 
 		"domain_name": rec.DomainName, "scan_job_id": rec.ScanJobID, "triggered_by": rec.TriggeredBy,
 		"provider": rec.Provider, "model": rec.Model, "status": rec.Status, "risk_level": rec.RiskLevel,
 		"summary": rec.Summary, "result_json": rec.ResultJSON, "raw_response": rec.RawResponse,
-		
+
 		"findings_count": rec.FindingsCount, "high_count": rec.HighCount, "medium_count": rec.MediumCount,
 		"low_count": rec.LowCount, "error": rec.Error, "retry_count": rec.RetryCount,
 		"started_at": rec.StartedAt.Format(time.RFC3339), "created_at": rec.CreatedAt.Format(time.RFC3339),
@@ -252,7 +252,7 @@ func (r *InspectionRecordRepository) Update(rec *models.InspectionRecord) error 
 	_, err := session.Run(query, map[string]any{
 		"id": rec.ID, "status": rec.Status, "risk_level": rec.RiskLevel, "summary": rec.Summary,
 		"result_json": rec.ResultJSON, "raw_response": rec.RawResponse,
-		
+
 		"findings_count": rec.FindingsCount, "high_count": rec.HighCount, "medium_count": rec.MediumCount,
 		"low_count": rec.LowCount, "error": rec.Error, "retry_count": rec.RetryCount,
 		"provider": rec.Provider, "model": rec.Model, "scan_job_id": rec.ScanJobID,

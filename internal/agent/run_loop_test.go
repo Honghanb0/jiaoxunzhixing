@@ -39,8 +39,8 @@ func (m *memTicketStore) List(status, scanJobID string) ([]*models.Ticket, error
 	return out, nil
 }
 func (m *memTicketStore) FindByFingerprint(fp string) (*models.Ticket, error) { return nil, nil }
-func (m *memTicketStore) UpdateStatus(id, status string) error               { return nil }
-func (m *memTicketStore) AddNotes(id, notes string) error                    { return nil }
+func (m *memTicketStore) UpdateStatus(id, status string) error                { return nil }
+func (m *memTicketStore) AddNotes(id, notes string) error                     { return nil }
 
 func ticketTypes(ts []*models.Ticket) []string {
 	var out []string

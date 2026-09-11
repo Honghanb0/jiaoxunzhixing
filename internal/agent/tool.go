@@ -27,18 +27,18 @@ type toolFunc struct {
 	fn          func(ctx context.Context, args map[string]any) (string, error)
 }
 
-func (t toolFunc) Name() string                             { return t.name }
-func (t toolFunc) Description() string                      { return t.description }
-func (t toolFunc) Schema() map[string]any                   { return t.schema }
+func (t toolFunc) Name() string           { return t.name }
+func (t toolFunc) Description() string    { return t.description }
+func (t toolFunc) Schema() map[string]any { return t.schema }
 func (t toolFunc) Execute(ctx context.Context, args map[string]any) (string, error) {
 	return t.fn(ctx, args)
 }
 
 // ToolCall 模型请求的一次工具调用（从 <tool_calls> 块解析得到）。
 type ToolCall struct {
-	Name     string         `json:"name"`
+	Name      string         `json:"name"`
 	Arguments map[string]any `json:"arguments"`
-	CallID   string         `json:"call_id,omitempty"`
+	CallID    string         `json:"call_id,omitempty"`
 }
 
 // ToolResult 工具执行结果（回写为 <tool_result> 块）。

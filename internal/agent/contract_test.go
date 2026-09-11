@@ -88,9 +88,9 @@ func TestParseContractIntent(t *testing.T) {
 			wantHost:   "127.0.0.1:8099",
 		},
 		{
-			goal:       "这次扫好后每天16:00都要日常巡检扫描",
-			wantRule:   true,
-			wantSched:  "0 16 * * *",
+			goal:      "这次扫好后每天16:00都要日常巡检扫描",
+			wantRule:  true,
+			wantSched: "0 16 * * *",
 		},
 		{
 			goal:       "提交工单", // 未点名类别 -> 覆盖全部需建单类别

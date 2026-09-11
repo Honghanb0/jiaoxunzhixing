@@ -51,21 +51,21 @@ type MatchRules struct {
 
 // Fingerprint 为归一化后的单条指纹。
 type Fingerprint struct {
-	ID                     string       `json:"id"`
-	ProductCN              string       `json:"product_cn"`
-	ProductEN              string       `json:"product_en"`
-	Category               string       `json:"category"`
-	Vendor                 string       `json:"vendor"`
-	RiskLevel              string       `json:"risk_level"`
-	CVSSBase               float64      `json:"cvss_base"`
-	Priority               any          `json:"priority"`
-	MatchType              string       `json:"match_type"`
-	MatchRules             MatchRules   `json:"match_rules"`
-	VerifyPaths            []any        `json:"verify_paths"`
-	CriticalVulnerabilities []CVEEntry  `json:"critical_vulnerabilities"`
-	AffectedVersions       string       `json:"affected_versions"`
-	Remediation            string       `json:"remediation"`
-	Source                 string       `json:"source"`
+	ID                      string     `json:"id"`
+	ProductCN               string     `json:"product_cn"`
+	ProductEN               string     `json:"product_en"`
+	Category                string     `json:"category"`
+	Vendor                  string     `json:"vendor"`
+	RiskLevel               string     `json:"risk_level"`
+	CVSSBase                float64    `json:"cvss_base"`
+	Priority                any        `json:"priority"`
+	MatchType               string     `json:"match_type"`
+	MatchRules              MatchRules `json:"match_rules"`
+	VerifyPaths             []any      `json:"verify_paths"`
+	CriticalVulnerabilities []CVEEntry `json:"critical_vulnerabilities"`
+	AffectedVersions        string     `json:"affected_versions"`
+	Remediation             string     `json:"remediation"`
+	Source                  string     `json:"source"`
 }
 
 // FingerprintStats 为生成结果统计。

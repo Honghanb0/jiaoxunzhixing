@@ -180,7 +180,6 @@ func (r *Runner) execute(rec *models.InspectionRecord, rule *models.InspectionRu
 	log.Printf("[Inspection] %s 完成(agentDriven=%v): 状态=%s 风险=%s 发现=%d(H:%d M:%d L:%d)",
 		rec.ID, isAgentDriven, rec.Status, rec.RiskLevel, rec.FindingsCount, rec.HighCount, rec.MediumCount, rec.LowCount)
 
-
 	if err := r.recordRepo.Update(rec); err != nil {
 		log.Printf("[Inspection] %s 写入最终结果失败: %v", rec.ID, err)
 	}
@@ -273,7 +272,6 @@ func (r *Runner) judge(rec *models.InspectionRecord, rule *models.InspectionRule
 func (r *Runner) agentAvailable() bool {
 	return r.aiMgr != nil && r.aiMgr.Ready()
 }
-
 
 // finalizeFailure 标记失败并（按规则）发送告警。
 func (r *Runner) finalizeFailure(rec *models.InspectionRecord, rule *models.InspectionRule, reason string) {

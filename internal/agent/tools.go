@@ -31,14 +31,14 @@ type Deps struct {
 	Store       *storage.Neo4jStore
 	Engine      *scanner.Engine
 	Sched       *scheduler.Scheduler
-	AI         *ai.Manager
+	AI          *ai.Manager
 	DomainRepo  *storage.DomainRepository
 	VulnRepo    *storage.VulnerabilityRepository
 	SensRepo    *storage.SensitiveInfoRepository
 	RuleRepo    *storage.InspectionRuleRepository
 	RecordRepo  *storage.InspectionRecordRepository
 	AlertRepo   *storage.AlertRepository
-	TicketRepo   TicketStore
+	TicketRepo  TicketStore
 	ScanJobRepo *storage.ScanJobRepository
 	TaskRepo    *taskRepo // 任务仓储：读取近期自主任务供「复盘/重跑」
 

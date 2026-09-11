@@ -549,9 +549,9 @@ func normalizeURL(u string) string {
 }
 
 type Domain struct {
-	ID         string
-	Name       string
-	MaxDepth   int
-	MaxPages   int
+	ID          string
+	Name        string
+	MaxDepth    int
+	MaxPages    int
 	Concurrency int
 }

@@ -39,15 +39,15 @@ type ReportBundle struct {
 
 // ReportSummary 报告摘要
 type ReportSummary struct {
-	GeneratedAt     time.Time `json:"generated_at"`
-	TargetURL       string    `json:"target_url"`
-	TotalVulns      int       `json:"total_vulns"`
-	CriticalCount   int       `json:"critical_count"`
-	HighCount       int       `json:"high_count"`
-	MediumCount     int       `json:"medium_count"`
-	LowCount        int       `json:"low_count"`
-	ByType          map[string]int `json:"by_type"`
-	ByConfidence    map[string]int `json:"by_confidence"`
+	GeneratedAt   time.Time      `json:"generated_at"`
+	TargetURL     string         `json:"target_url"`
+	TotalVulns    int            `json:"total_vulns"`
+	CriticalCount int            `json:"critical_count"`
+	HighCount     int            `json:"high_count"`
+	MediumCount   int            `json:"medium_count"`
+	LowCount      int            `json:"low_count"`
+	ByType        map[string]int `json:"by_type"`
+	ByConfidence  map[string]int `json:"by_confidence"`
 }
 
 // GenerateReport 生成完整报告包
@@ -154,20 +154,20 @@ func (r *Reporter) GenerateJSON(vulns []*models.Vulnerability, targetURL string,
 	vulnsJSON := make([]map[string]interface{}, 0, len(vulns))
 	for _, v := range vulns {
 		entry := map[string]interface{}{
-			"id":          v.ID,
-			"type":        v.Type,
-			"name":        v.Name,
-			"severity":    v.Severity,
-			"confidence":  v.Confidence,
-			"description": v.Description,
-			"evidence":    v.Evidence,
-			"url":         v.URL,
-			"parameter":   v.Parameter,
-			"remediation": v.Remediation,
-			"cve_ids":     v.CVEIDs,
+			"id":                v.ID,
+			"type":              v.Type,
+			"name":              v.Name,
+			"severity":          v.Severity,
+			"confidence":        v.Confidence,
+			"description":       v.Description,
+			"evidence":          v.Evidence,
+			"url":               v.URL,
+			"parameter":         v.Parameter,
+			"remediation":       v.Remediation,
+			"cve_ids":           v.CVEIDs,
 			"affected_versions": v.AffectedVersions,
-			"fingerprint": v.Fingerprint,
-			"found_at":    v.FoundAt,
+			"fingerprint":       v.Fingerprint,
+			"found_at":          v.FoundAt,
 		}
 
 		// 关联规则信息
@@ -194,12 +194,12 @@ func (r *Reporter) GenerateJSON(vulns []*models.Vulnerability, targetURL string,
 		"generated_at":   summary.GeneratedAt,
 		"target_url":     targetURL,
 		"summary": map[string]interface{}{
-			"total":     summary.TotalVulns,
-			"critical":  summary.CriticalCount,
-			"high":      summary.HighCount,
-			"medium":    summary.MediumCount,
-			"low":       summary.LowCount,
-			"by_type":   summary.ByType,
+			"total":         summary.TotalVulns,
+			"critical":      summary.CriticalCount,
+			"high":          summary.HighCount,
+			"medium":        summary.MediumCount,
+			"low":           summary.LowCount,
+			"by_type":       summary.ByType,
 			"by_confidence": summary.ByConfidence,
 		},
 		"vulnerabilities": vulnsJSON,

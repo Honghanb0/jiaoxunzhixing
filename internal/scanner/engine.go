@@ -69,7 +69,7 @@ type Engine struct {
 	cfg           *config.Config
 	crawler       *Crawler
 	detector      *Detector
-	assetScanner  *AssetScanner       // 网络资产扫描器（端口/服务/子域名）
+	assetScanner  *AssetScanner // 网络资产扫描器（端口/服务/子域名）
 	domainRepo    *storage.DomainRepository
 	scanJobRepo   *storage.ScanJobRepository
 	vulnRepo      *storage.VulnerabilityRepository
@@ -77,8 +77,8 @@ type Engine struct {
 	pageRepo      *storage.PageRepository
 	assetRepo     *storage.AssetRepository // 资产图仓储
 	aiModule      *ai.AIModule
-	ruleEngine    *RuleEngine  // 企业级漏洞规则引擎
-	reporter      *Reporter    // 漏洞报告生成器（Markdown/JSON/HTML + 工单集成）
+	ruleEngine    *RuleEngine // 企业级漏洞规则引擎
+	reporter      *Reporter   // 漏洞报告生成器（Markdown/JSON/HTML + 工单集成）
 
 	// 运行中任务的取消函数：scanJobID -> context.CancelFunc
 	cancels  sync.Map
@@ -567,7 +567,7 @@ func (e *Engine) GetScanResults(scanJobID string) (*ScanResults, error) {
 type ScanResults struct {
 	Vulnerabilities []*models.Vulnerability `json:"vulnerabilities"`
 	SensitiveInfos  []*models.SensitiveInfo `json:"sensitive_infos"`
-	Summary         *models.ScanSummary      `json:"summary"`
+	Summary         *models.ScanSummary     `json:"summary"`
 }
 
 // ScanTimeout 单次扫描允许的最长时长（含看门狗上限），供巡检编排等待扫描结束时设超时。
@@ -680,16 +680,16 @@ func (e *Engine) ScanAssets(ctx context.Context, domainID string) (*AssetScanSum
 
 // AssetScanSummary 资产扫描结果摘要
 type AssetScanSummary struct {
-	DomainID       string               `json:"domain_id"`
-	DomainName     string               `json:"domain_name"`
-	SubdomainCount int                  `json:"subdomain_count"`
-	IPCount        int                  `json:"ip_count"`
-	PortCount      int                  `json:"port_count"`
-	ServiceCount   int                  `json:"service_count"`
-	Subdomains     []*models.Subdomain  `json:"subdomains"`
-	IPs            []*models.IP         `json:"ips"`
-	Ports          []*models.Port       `json:"ports"`
-	Services       []*models.Service    `json:"services"`
+	DomainID       string              `json:"domain_id"`
+	DomainName     string              `json:"domain_name"`
+	SubdomainCount int                 `json:"subdomain_count"`
+	IPCount        int                 `json:"ip_count"`
+	PortCount      int                 `json:"port_count"`
+	ServiceCount   int                 `json:"service_count"`
+	Subdomains     []*models.Subdomain `json:"subdomains"`
+	IPs            []*models.IP        `json:"ips"`
+	Ports          []*models.Port      `json:"ports"`
+	Services       []*models.Service   `json:"services"`
 }
 
 // GetAssetGraph 获取域名的资产拓扑图数据
