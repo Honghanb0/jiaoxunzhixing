@@ -14,10 +14,17 @@ import (
 type AuthHandler struct {
 	userRepo *storage.UserRepository
 	cfg      *config.AuthConfig
+	limiter  *loginLimiter
 }
 
 func NewAuthHandler(userRepo *storage.UserRepository, cfg *config.AuthConfig) *AuthHandler {
-	return &AuthHandler{userRepo: userRepo, cfg: cfg}
+	h := &AuthHandler{userRepo: userRepo, cfg: cfg}
+	// 登录失败限速：默认开启（可在 config.yaml 的 auth.rate_limit.enabled 关闭）
+	if cfg != nil && cfg.RateLimitEnabled() {
+		maxFails, window, lockFor := cfg.RateLimitOrDefaults()
+		h.limiter = newLoginLimiter(maxFails, window, lockFor)
+	}
+	return h
 }
 
 type RegisterRequest struct {
@@ -99,6 +106,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 }
 
 // Login 校验凭据并签发 JWT。
+// 失败限速在口令校验之前生效：锁定期内直接返回 429，既阻断爆破也避免 bcrypt 空转。
 func (h *AuthHandler) Login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -106,16 +114,26 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
+	if !h.checkLoginAllowed(c, req.Username) {
+		return
+	}
+
 	user, err := h.userRepo.GetByUsername(req.Username)
 	if err != nil {
+		// 用户不存在与口令错误返回同一文案，避免账号枚举；
+		// 同样计入失败次数，防止用"探测用户名"绕过限速。
+		h.recordLoginFailure(c, req.Username)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "用户名或密码错误"})
 		return
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
+		h.recordLoginFailure(c, req.Username)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "用户名或密码错误"})
 		return
 	}
+
+	h.resetLoginFailures(c, req.Username)
 
 	token, err := GenerateToken(h.cfg.JwtSecret, user, h.cfg.TokenExpireHours)
 	if err != nil {

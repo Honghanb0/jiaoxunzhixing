@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -39,7 +40,20 @@ func NewServerWithEngine(cfg *config.Config, store *storage.Neo4jStore, engine *
 
 	router := gin.New()
 	router.Use(gin.Recovery())
-	router.Use(corsMiddleware())
+
+	// 可信代理：默认不信任任何代理，ClientIP() 直接取 TCP 连接来源，
+	// 防止攻击者用伪造的 X-Forwarded-For 绕过登录限速、污染审计日志。
+	// 只有明确部署在 nginx / LB 之后，才在 config.yaml 的 server.trusted_proxies 里声明代理地址。
+	if len(cfg.Server.TrustedProxies) == 0 {
+		if err := router.SetTrustedProxies(nil); err != nil {
+			log.Printf("[Server] 设置可信代理为空失败（已忽略）: %v", err)
+		}
+	} else if err := router.SetTrustedProxies(cfg.Server.TrustedProxies); err != nil {
+		log.Printf("[Server] trusted_proxies 配置无效（将退回不信任任何代理）: %v", err)
+		_ = router.SetTrustedProxies(nil)
+	}
+
+	router.Use(corsMiddleware(cfg.Server.CORSAllowedOrigins))
 
 	domainRepo := storage.NewDomainRepository(store)
 	scanJobRepo := storage.NewScanJobRepository(store)
@@ -295,29 +309,59 @@ func portOf(addr string) string {
 	return addr
 }
 
-// corsMiddleware 跨域支持。
+// corsMiddleware 跨域支持（白名单模式）。
+//
+// 安全修复：此前实现是把请求头里的 Origin 原样回显（任意源都放行），
+// 只要将来有人加上 Access-Control-Allow-Credentials，就等于任何网站都能跨域读取后台数据。
+// 现在改为白名单：只有 server.cors_allowed_origins 里显式列出的源才回 CORS 头，
+// 其余一律不回；由于前端由本服务直接托管（同源），留空即为最安全的默认值。
+//
 // 关键点：Access-Control-Allow-Headers 必须包含 Authorization，
 // 否则前端携带 Bearer Token 的请求会在预检(OPTIONS)阶段被浏览器拦截，
 // 表现为 fetch() 直接抛 "Failed to fetch"，根本拿不到响应。
-func corsMiddleware() gin.HandlerFunc {
+func corsMiddleware(allowedOrigins []string) gin.HandlerFunc {
+	allow := make(map[string]struct{}, len(allowedOrigins))
+	allowAll := false
+	for _, o := range allowedOrigins {
+		o = strings.TrimSpace(o)
+		if o == "" {
+			continue
+		}
+		if o == "*" {
+			allowAll = true
+			continue
+		}
+		allow[strings.TrimRight(o, "/")] = struct{}{}
+	}
+
 	return func(c *gin.Context) {
-		origin := c.Request.Header.Get("Origin")
-		if origin != "" {
+		origin := strings.TrimRight(c.Request.Header.Get("Origin"), "/")
+		if origin != "" && (allowAll || hasOrigin(allow, origin)) {
 			c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
 			c.Writer.Header().Set("Vary", "Origin")
-		} else {
-			c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+			c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+			c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, Accept")
+			c.Writer.Header().Set("Access-Control-Expose-Headers", "Content-Length, Content-Type")
+			c.Writer.Header().Set("Access-Control-Max-Age", "86400")
 		}
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, Accept")
-		c.Writer.Header().Set("Access-Control-Expose-Headers", "Content-Length, Content-Type")
-		c.Writer.Header().Set("Access-Control-Max-Age", "86400")
 
 		if c.Request.Method == http.MethodOptions {
+			// 未列入白名单的预检请求不回 CORS 头，浏览器据此拒绝后续实际请求
 			c.AbortWithStatus(http.StatusNoContent)
 			return
 		}
 
 		c.Next()
 	}
+}
+
+// hasOrigin 判断 Origin 是否在白名单内（忽略大小写）。
+func hasOrigin(allow map[string]struct{}, origin string) bool {
+	if _, ok := allow[origin]; ok {
+		return true
+	}
+	if _, ok := allow[strings.ToLower(origin)]; ok {
+		return true
+	}
+	return false
 }

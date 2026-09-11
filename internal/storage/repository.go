@@ -167,7 +167,9 @@ func (r *ScanJobRepository) Create(job *models.ScanJob) error {
 }
 
 func (r *ScanJobRepository) UpdateStatus(id, status string) error {
-	query := fmt.Sprintf(`MATCH (s:ScanJob {id: $id}) SET s.status = '%s'`, status)
+	// 必须走参数绑定：即使当前调用方只传内部常量，字符串拼接也是注入面，
+	// 一旦将来有人把用户输入接进来就会直接变成 Cypher 注入。
+	query := `MATCH (s:ScanJob {id: $id}) SET s.status = $status`
 	session := r.store.Session()
 	defer session.Close()
 	_, err := session.Run(query, map[string]any{"id": id, "status": status})

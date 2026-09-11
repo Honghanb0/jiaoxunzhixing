@@ -1,14 +1,16 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/spf13/viper"
-
 )
 
 type Config struct {
@@ -26,9 +28,9 @@ type Config struct {
 
 // AgentConfig 自主智能体（多轮工具调用 + 自主规划）配置。
 type AgentConfig struct {
-	Enabled  bool `mapstructure:"enabled"`   // 是否启用自主智能体
-	MaxTurns int  `mapstructure:"max_turns"` // 单任务最大推理轮次（防失控），默认 24
-	Model    string `mapstructure:"model"`   // 可选：覆盖默认模型供应商
+	Enabled  bool   `mapstructure:"enabled"`   // 是否启用自主智能体
+	MaxTurns int    `mapstructure:"max_turns"` // 单任务最大推理轮次（防失控），默认 24
+	Model    string `mapstructure:"model"`     // 可选：覆盖默认模型供应商
 }
 
 type ServerConfig struct {
@@ -36,6 +38,18 @@ type ServerConfig struct {
 	Port    int    `mapstructure:"port"`
 	Mode    string `mapstructure:"mode"`
 	WebRoot string `mapstructure:"web_root"`
+
+	// CORSAllowedOrigins 允许跨域访问的源白名单。
+	// 留空表示"仅同源"——前端由本服务直接托管（web/index.html），
+	// 同源场景不需要任何 CORS 响应头，这也是最安全的默认值。
+	// 只有前后端分离部署时，才在这里显式列出前端域名。
+	CORSAllowedOrigins []string `mapstructure:"cors_allowed_origins"`
+
+	// TrustedProxies 可信反向代理地址（CIDR 或 IP）。
+	// 留空表示不信任任何代理，客户端 IP 一律取 TCP 连接的真实来源（RemoteAddr），
+	// 避免攻击者伪造 X-Forwarded-For 绕过登录限速与审计。
+	// 部署在 nginx / 负载均衡之后时，必须填入代理地址。
+	TrustedProxies []string `mapstructure:"trusted_proxies"`
 }
 
 type DatabaseConfig struct {
@@ -112,11 +126,11 @@ type ScannerConfig struct {
 }
 
 type SchedulerConfig struct {
-	Enabled              bool `mapstructure:"enabled"`
-	MaxConcurrentScans   int  `mapstructure:"max_concurrent_scans"`
-	InspectionTimeoutSec int  `mapstructure:"inspection_timeout_sec"` // 单次巡检总超时（含扫描+AI），默认 1800
-	DefaultRetryCount    int  `mapstructure:"default_retry_count"`    // AI 调用失败默认重试次数
-	DefaultRetryBackoffSec int `mapstructure:"default_retry_backoff_sec"` // 重试退避秒数
+	Enabled                bool `mapstructure:"enabled"`
+	MaxConcurrentScans     int  `mapstructure:"max_concurrent_scans"`
+	InspectionTimeoutSec   int  `mapstructure:"inspection_timeout_sec"`    // 单次巡检总超时（含扫描+AI），默认 1800
+	DefaultRetryCount      int  `mapstructure:"default_retry_count"`       // AI 调用失败默认重试次数
+	DefaultRetryBackoffSec int  `mapstructure:"default_retry_backoff_sec"` // 重试退避秒数
 }
 
 type SensitiveConfig struct {
@@ -133,6 +147,71 @@ type AlertsConfig struct {
 type AuthConfig struct {
 	JwtSecret        string `mapstructure:"jwt_secret"`
 	TokenExpireHours int    `mapstructure:"token_expire_hours"`
+
+	// 登录失败限速：防止对 /api/auth/login 的无限次口令爆破。
+	RateLimit RateLimitConfig `mapstructure:"rate_limit"`
+}
+
+// RateLimitConfig 登录接口失败限速配置。
+// 采用「IP」与「IP+账号」双维度计数：前者挡住单机爆破，
+// 后者挡住换 IP 轮询同一个账号的分布式爆破（且不会因单账号被锁而波及其他用户）。
+type RateLimitConfig struct {
+	Enabled     *bool `mapstructure:"enabled"`      // 默认 true
+	MaxFailures int   `mapstructure:"max_failures"` // 窗口内允许的失败次数，默认 5
+	WindowSec   int   `mapstructure:"window_sec"`   // 统计窗口（秒），默认 300
+	LockSec     int   `mapstructure:"lock_sec"`     // 触发后锁定时长（秒），默认 900
+}
+
+// MinJWTSecretLen 是 JWT 签名密钥的最小长度要求。
+// HS256 的密钥强度直接决定令牌能否被离线爆破，64 位熵是底线。
+const MinJWTSecretLen = 32
+
+// EnsureJWTSecret 校验 JWT 签名密钥强度，必要时生成一个随机密钥。
+//
+// 背景（安全）：配置里缺失 auth.jwt_secret 时该字段为空字符串，而 HS256 允许空密钥——
+// 意味着任何人拿到源码就能自签一个 role=admin 的令牌直接登入后台。
+// 这里做两层保护：
+//  1. 完全未配置（空串，或仍是 "${VAR}" 占位符没被环境变量替换）→ 生成 48 字节随机密钥。
+//     服务照常启动（不因漏配置而阻塞部署），但重启后旧令牌失效，同时打印醒目警告。
+//  2. 显式配置了但长度不足 → 返回错误拒绝启动。"以为自己配了"的弱密钥比没配更危险。
+func (a *AuthConfig) EnsureJWTSecret() error {
+	s := strings.TrimSpace(a.JwtSecret)
+	if s == "" || (strings.HasPrefix(s, "${") && strings.HasSuffix(s, "}")) {
+		buf := make([]byte, 48)
+		if _, err := rand.Read(buf); err != nil {
+			return fmt.Errorf("生成随机 JWT 签名密钥失败: %w", err)
+		}
+		a.JwtSecret = base64.RawURLEncoding.EncodeToString(buf)
+		log.Printf("[Auth] ⚠️  未配置 auth.jwt_secret（或环境变量 JWT_SECRET 未注入），" +
+			"已临时生成随机签名密钥。进程重启后所有登录态将失效——" +
+			"请显式配置 JWT_SECRET（>= 32 字符）以保持会话稳定。")
+		return nil
+	}
+	if len(s) < MinJWTSecretLen {
+		return fmt.Errorf("auth.jwt_secret 过短（当前 %d 字符，要求 >= %d 字符）："+
+			"HS256 弱密钥可被离线爆破并用于伪造管理员令牌，请改用随机生成的密钥", len(s), MinJWTSecretLen)
+	}
+	return nil
+}
+
+// RateLimitEnabled 返回限速开关（未显式配置时默认开启）。
+func (a *AuthConfig) RateLimitEnabled() bool {
+	return a.RateLimit.Enabled == nil || *a.RateLimit.Enabled
+}
+
+// RateLimitOrDefaults 返回补齐默认值后的限速参数。
+func (a *AuthConfig) RateLimitOrDefaults() (maxFailures int, window, lock time.Duration) {
+	maxFailures, window, lock = a.RateLimit.MaxFailures, time.Duration(a.RateLimit.WindowSec)*time.Second, time.Duration(a.RateLimit.LockSec)*time.Second
+	if maxFailures <= 0 {
+		maxFailures = 5
+	}
+	if window <= 0 {
+		window = 5 * time.Minute
+	}
+	if lock <= 0 {
+		lock = 15 * time.Minute
+	}
+	return
 }
 
 type AlertChannel struct {
@@ -219,7 +298,6 @@ func Load(configPath string) (*Config, error) {
 	GlobalConfig = &cfg
 	return &cfg, nil
 }
-
 
 // normalizeAIConfig 补齐多模型配置的默认值，并把旧版扁平配置并入对应供应商。
 // 这样老配置（ai.provider + ai.api_key）无需修改即可继续工作。

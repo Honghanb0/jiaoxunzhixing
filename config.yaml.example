@@ -5,6 +5,17 @@ server:
   mode: "debug"
   web_root: "./web"  # 前端静态资源根目录（SPA 首页 index.html 所在目录）
 
+  # CORS 白名单：仅当前后端分离部署、前端域名与服务不同源时才需要填。
+  # 留空 = 仅同源（前端由本服务直接托管时最安全，不产生任何 CORS 响应头）。
+  # 示例： ["https://console.example.com", "http://localhost:5173"]
+  cors_allowed_origins: []
+
+  # 可信反向代理：留空 = 不信任任何代理，客户端 IP 取 TCP 真实来源，
+  # 可防止伪造 X-Forwarded-For 绕过登录限速。
+  # 部署在 nginx / 负载均衡之后时必须填写代理地址，否则所有请求会被视为同一 IP。
+  # 示例： ["127.0.0.1", "172.16.0.0/12"]
+  trusted_proxies: []
+
 # Neo4j Database
 database:
   neo4j:
@@ -76,3 +87,26 @@ logging:
   level: "debug"
   format: "text"
   output: "stdout"
+
+# 认证与授权（安全关键配置，不可省略）
+auth:
+  # JWT 签名密钥。强烈建议用环境变量注入而不是明文写在这里：
+  #   export JWT_SECRET="$(openssl rand -base64 48)"
+  # 要求 >= 32 字符，否则服务拒绝启动（HS256 弱密钥可被离线爆破并伪造管理员令牌）。
+  # 若这里仍是未替换的 ${JWT_SECRET} 占位符，服务会自动生成随机密钥兜底，
+  # 但进程重启后所有登录态失效，仅作为避免"零配置直接开门"的保险。
+  jwt_secret: "${JWT_SECRET}"
+  token_expire_hours: 72
+
+  # 登录失败限速（防口令爆破）
+  rate_limit:
+    enabled: true        # 默认开启
+    max_failures: 5      # 窗口内允许的失败次数
+    window_sec: 300      # 统计窗口（秒）
+    lock_sec: 900        # 触发后的锁定时长（秒）
+
+# 自主智能体
+agent:
+  enabled: true        # 是否启用自主智能体
+  max_turns: 24        # 单任务最大推理轮次（达到上限仍未完成则标记 failed，防失控）
+  model: ""            # 可选：覆盖默认模型供应商（留空则用 ai.default）

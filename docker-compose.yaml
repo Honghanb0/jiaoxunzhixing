@@ -1,15 +1,20 @@
-version: '3.8'
-
 services:
   security-agent:
     build: .
+    container_name: jxz-security-agent
     ports:
+      # 宿主机端口按需调整；若 8080 被占用可改成 "80:8080"
       - "8080:8080"
     environment:
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      # JWT 签名密钥（必须 >= 32 字符）。未注入时服务会生成随机密钥兜底，
+      # 但进程重启后登录态会失效，生产环境请在 .env 中显式配置。
+      - JWT_SECRET=${JWT_SECRET}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
       - WEBHOOK_URL=${WEBHOOK_URL:-}
     volumes:
       - ./config.yaml:/app/config.yaml:ro
+      - ./logs:/app/logs
     depends_on:
       neo4j:
         condition: service_healthy
@@ -19,19 +24,23 @@ services:
 
   neo4j:
     image: neo4j:5.14-community
+    container_name: jxz-neo4j
+    # 图库只监听本机回环，不对外暴露（避免 Neo4j 数据库被公网直接访问）
     ports:
-      - "7474:7474"
-      - "7687:7687"
+      - "127.0.0.1:7474:7474"
+      - "127.0.0.1:7687:7687"
     environment:
-      - NEO4J_AUTH=neo4j/neo4j_password
-      - NEO4J_PLUGINS=['apoc']
+      - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD}
     volumes:
       - neo4j_data:/data
     healthcheck:
-      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "neo4j_password", "RETURN 1"]
+      # 从 NEO4J_AUTH 中截取密码（去掉 "neo4j/" 前缀）后自检，避免明文写进 compose
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p \"$${NEO4J_AUTH#*/}\" 'RETURN 1' || exit 1"]
       interval: 10s
       timeout: 10s
-      retries: 5
+      retries: 12
+      start_period: 40s
+    restart: unless-stopped
     networks:
       - security-net
 

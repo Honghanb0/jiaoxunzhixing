@@ -89,6 +89,12 @@ func main() {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 
+	// 安全前置校验：JWT 签名密钥必须有足够强度，否则任何人可伪造管理员令牌。
+	// 必须放在任何路由注册之前，避免带病启动。
+	if err := cfg.Auth.EnsureJWTSecret(); err != nil {
+		log.Fatalf("[Auth] 安全配置校验失败: %v", err)
+	}
+
 	// 接管标准库 log 输出到环形缓冲（供 /api/logs 拉取），并保留 stdout + 落盘 logs/server.log。
 	// 必须在所有业务日志之前安装，确保启动后的日志均可在“系统日志”页查看。
 	logutil.Install("logs")
