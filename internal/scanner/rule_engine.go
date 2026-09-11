@@ -22,6 +22,7 @@ import (
 // =============================================================================
 
 // Embed rules directory for compiled-in rules (可选，部署时不依赖外部文件)
+//
 //go:embed rules/*.yaml
 var embeddedRulesFS embed.FS
 

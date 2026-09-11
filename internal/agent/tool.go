@@ -105,6 +105,7 @@ func (r *ToolRegistry) Descriptions() string {
 //	<tool_result name="query_neo4j" call_id="call_1" error="false">
 //	{...json...}
 //	</tool_result>
+//
 // 允许 <tool_calls> / </tool_calls> 之间夹带分词器产物（如 </｜｜DSML｜｜tool_calls>）：
 // 开头与结尾的标签均可包含任意非 '>' 字符前缀，从而容忍模型偶发的畸形闭合标签，
 // 避免 wait_scan 等工具调用被整段丢弃导致后续步骤无法读取结果。

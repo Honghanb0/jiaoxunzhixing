@@ -20,7 +20,8 @@ func NewAssetRepository(store *Neo4jStore) *AssetRepository {
 
 // SaveAssetScan 保存资产扫描结果到 Neo4j 图谱
 // 关系链: Domain -> RESOLVES_TO -> IP -> EXPOSES -> Port -> RUNS -> Service
-//         Domain -> HAS_SUBDOMAIN -> Subdomain
+//
+//	Domain -> HAS_SUBDOMAIN -> Subdomain
 func (r *AssetRepository) SaveAssetScan(domainID string, subdomains []*models.Subdomain, ips []*models.IP, ports []*models.Port, services []*models.Service) error {
 	session := r.store.Session()
 	defer session.Close()

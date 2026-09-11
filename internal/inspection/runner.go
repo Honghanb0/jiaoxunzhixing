@@ -237,9 +237,9 @@ func (r *Runner) latestScanResults(domainID string) (*scanner.ScanResults, strin
 // judge 依据巡检来源与智能体可用性，明确判定巡检记录状态，确保 AI 相关与非 AI 相关分类互不干扰：
 //   - 非 AI 相关（定时/手动规则巡检）：扫描成功即判定 success（结果不依赖 AI，无 partial 概念）。
 //   - AI 相关（由智能体调用触发）：
-//       * 智能体可用   → success：扫描结果已就绪，AI 研判交由智能体完成。
-//       * 智能体不可用 → 触发兜底扫描（即本次扫描），仅当兜底扫描成功时才标注 partial；
-//         若兜底扫描也无数据，已在上方 scanResults==nil 分支标记为 failed，不会落入本函数。
+//   - 智能体可用   → success：扫描结果已就绪，AI 研判交由智能体完成。
+//   - 智能体不可用 → 触发兜底扫描（即本次扫描），仅当兜底扫描成功时才标注 partial；
+//     若兜底扫描也无数据，已在上方 scanResults==nil 分支标记为 failed，不会落入本函数。
 //
 // 调用前必须保证 scanResults != nil（无数据分支已在 execute 中提前返回 failed）。
 func (r *Runner) judge(rec *models.InspectionRecord, rule *models.InspectionRule, scanResults *scanner.ScanResults, agentDriven bool) *models.InspectionResult {
