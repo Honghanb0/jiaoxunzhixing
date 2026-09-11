@@ -123,6 +123,43 @@ type ScannerConfig struct {
 	MaxScanMinutes int `mapstructure:"max_scan_minutes"`
 	// StaleJobMinutes 启动回收阈值：启动时间早于该值且仍为 running 的任务判为僵死（0 = 默认 180 分钟）
 	StaleJobMinutes int `mapstructure:"stale_job_minutes"`
+
+	// RateLimit 扫描限速：对被测站点做速率约束（安全合规要求，也避免被目标 WAF 封禁）
+	RateLimit ScannerRateLimit `mapstructure:"rate_limit"`
+}
+
+// ScannerRateLimit 爬取阶段的速率约束。
+type ScannerRateLimit struct {
+	Enabled *bool `mapstructure:"enabled"` // 默认 true
+
+	// RequestsPerSec 全局限速：整轮扫描每秒最多发出的请求数（默认 5）。
+	RequestsPerSec float64 `mapstructure:"requests_per_sec"`
+
+	// Burst 瞬时突发容量。留 0 则自动取 RequestsPerSec 向上取整。
+	Burst int `mapstructure:"burst"`
+
+	// MinGapMs 对同一主机两次请求之间的最小间隔（毫秒，默认 200），
+	// 用于把请求摊开、避免形成突发流。
+	MinGapMs int `mapstructure:"min_gap_ms"`
+}
+
+// RateLimitEnabled 返回扫描限速开关（未显式配置时默认开启）。
+func (s *ScannerConfig) RateLimitEnabled() bool {
+	return s.RateLimit.Enabled == nil || *s.RateLimit.Enabled
+}
+
+// RateLimitOrDefaults 返回补齐默认值后的限速参数（5 req/s、同主机间隔 200ms）。
+func (s *ScannerConfig) RateLimitOrDefaults() (rps float64, burst int, minGap time.Duration) {
+	rps = s.RateLimit.RequestsPerSec
+	if rps <= 0 {
+		rps = 5
+	}
+	burst = s.RateLimit.Burst
+	minGap = time.Duration(s.RateLimit.MinGapMs) * time.Millisecond
+	if minGap < 0 {
+		minGap = 0
+	}
+	return
 }
 
 type SchedulerConfig struct {

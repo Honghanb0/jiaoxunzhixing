@@ -25,6 +25,8 @@ type Crawler struct {
 	pageRepo   *storage.PageRepository
 	// 进度回调：crawled 当前已爬页面数，total 当前最大页面数（会随爬取动态调整）
 	onProgress func(crawled, total int, currentURL string)
+	// pacer 请求限速器；限速关闭时为 nil
+	pacer *hostPacer
 }
 
 // SetProgressCallback 设置进度回调
@@ -73,7 +75,17 @@ func NewCrawler(cfg *config.ScannerConfig, domainRepo *storage.DomainRepository,
 		cfg:        cfg,
 		domainRepo: domainRepo,
 		pageRepo:   pageRepo,
+		pacer:      newCrawlerPacer(cfg),
 	}
+}
+
+// newCrawlerPacer 按配置构造限速器；未启用时返回 nil（调用方需判空）。
+func newCrawlerPacer(cfg *config.ScannerConfig) *hostPacer {
+	if cfg == nil || !cfg.RateLimitEnabled() {
+		return nil
+	}
+	rps, burst, minGap := cfg.RateLimitOrDefaults()
+	return newHostPacer(rps, burst, minGap)
 }
 
 // Start 执行爬取。
@@ -333,6 +345,15 @@ func (c *Crawler) crawlPage(ctx *CrawlContext, task *CrawlTask) *CrawlResult {
 		req.Header.Set("User-Agent", c.cfg.UserAgent)
 		req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 		req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+
+		// 限速：真正发包前等待配额。放在重试循环内，重试流量同样受限，
+		// 避免"失败重试"绕过速率约束把目标站打爆。
+		if c.pacer != nil {
+			if werr := c.pacer.wait(reqCtx, pacerHost(task.URL)); werr != nil {
+				result.Error = werr
+				return result
+			}
+		}
 
 		resp, err = c.client.Do(req)
 		if err == nil {

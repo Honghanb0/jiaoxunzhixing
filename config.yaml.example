@@ -46,6 +46,13 @@ scanner:
   max_pages: 100
   respect_robots: true
 
+  # 扫描限速：对被测站点的速率约束（安全合规要求，同时避免触发目标 WAF 封禁）
+  rate_limit:
+    enabled: true          # 默认开启
+    requests_per_sec: 5    # 整轮扫描每秒最多发出的请求数（全局令牌桶）
+    burst: 5               # 瞬时突发容量，留 0 则自动取 requests_per_sec 向上取整
+    min_gap_ms: 200        # 对同一主机两次请求的最小间隔（毫秒）
+
 # Scheduler
 scheduler:
   enabled: true

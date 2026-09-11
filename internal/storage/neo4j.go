@@ -127,7 +127,11 @@ func validateConfig(cfg *config.Neo4jConfig) error {
 	return nil
 }
 
-// initSchema 创建唯一性约束。使用 Neo4j 5 命名约束语法，失败不致命。
+// initSchema 创建唯一性约束与二级索引。使用 Neo4j 5 命名语法，失败不致命。
+//
+// 唯一约束自带索引，但只覆盖 id 字段；按 status / created_at / domain_id 这类
+// 属性过滤的查询（列表页、统计、巡检去重）没有索引会退化为全库扫描，
+// 数据量上来后明显变慢，因此这里补上高频过滤字段的二级索引。
 func (s *Neo4jStore) initSchema() error {
 	constraints := []string{
 		"CREATE CONSTRAINT domain_id_unique IF NOT EXISTS FOR (d:Domain) REQUIRE (d.id) IS UNIQUE",
@@ -135,15 +139,32 @@ func (s *Neo4jStore) initSchema() error {
 		"CREATE CONSTRAINT vuln_id_unique IF NOT EXISTS FOR (v:Vulnerability) REQUIRE (v.id) IS UNIQUE",
 		"CREATE CONSTRAINT sensitive_id_unique IF NOT EXISTS FOR (s:SensitiveInfo) REQUIRE (s.id) IS UNIQUE",
 		"CREATE CONSTRAINT alert_id_unique IF NOT EXISTS FOR (a:Alert) REQUIRE (a.id) IS UNIQUE",
+		"CREATE CONSTRAINT ticket_id_unique IF NOT EXISTS FOR (t:Ticket) REQUIRE (t.id) IS UNIQUE",
+		"CREATE CONSTRAINT page_id_unique IF NOT EXISTS FOR (p:Page) REQUIRE (p.id) IS UNIQUE",
+	}
+
+	indexes := []string{
+		// 列表页 / 看板按状态、严重级别过滤
+		"CREATE INDEX scanjob_status_idx IF NOT EXISTS FOR (s:ScanJob) ON (s.status)",
+		"CREATE INDEX scanjob_domain_idx IF NOT EXISTS FOR (s:ScanJob) ON (s.domain_id)",
+		"CREATE INDEX scanjob_created_idx IF NOT EXISTS FOR (s:ScanJob) ON (s.created_at)",
+		"CREATE INDEX vuln_severity_idx IF NOT EXISTS FOR (v:Vulnerability) ON (v.severity)",
+		"CREATE INDEX vuln_domain_idx IF NOT EXISTS FOR (v:Vulnerability) ON (v.domain_id)",
+		"CREATE INDEX vuln_job_idx IF NOT EXISTS FOR (v:Vulnerability) ON (v.scan_job_id)",
+		"CREATE INDEX sensitive_domain_idx IF NOT EXISTS FOR (s:SensitiveInfo) ON (s.domain_id)",
+		"CREATE INDEX alert_status_idx IF NOT EXISTS FOR (a:Alert) ON (a.status)",
+		"CREATE INDEX ticket_status_idx IF NOT EXISTS FOR (t:Ticket) ON (t.status)",
+		"CREATE INDEX user_username_idx IF NOT EXISTS FOR (u:User) ON (u.username)",
+		"CREATE INDEX page_domain_idx IF NOT EXISTS FOR (p:Page) ON (p.domain_id)",
 	}
 
 	session := s.driver.NewSession(neo4j.SessionConfig{DatabaseName: s.cfg.Database})
 	defer session.Close()
 
 	var firstErr error
-	for _, cypher := range constraints {
+	for _, cypher := range append(constraints, indexes...) {
 		if _, err := session.Run(cypher, nil); err != nil {
-			log.Printf("[Neo4j] 警告: 创建约束失败: %v", err)
+			log.Printf("[Neo4j] 警告: 创建约束/索引失败: %v", err)
 			if firstErr == nil {
 				firstErr = err
 			}
