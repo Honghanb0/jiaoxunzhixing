@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -60,6 +61,17 @@ const (
 	PathExecuteStop = "/open/api/v2/agent/execute/stop"
 	PathSearch      = "/open/api/v2/agent/search"
 	PathStatistics  = "/open/api/v2/agent/statistics"
+
+	// Chatbot 扩展插件（「小恒插件」）相关：把恒脑对话窗以 iframe 嵌进第三方系统。
+	// 关键安全约定：**appSecret 只留在服务端**，前端拿到的仅是短期 token。
+	PathAssistantToken      = "/open/api/assistants/token"
+	PathAssistantTokenDel   = "/open/api/assistants/token/delToken"
+	PathAssistantTokenCheck = "/open/api/assistants/token/checkWithRefresh"
+
+	// ChatbotPath 是 iframe 里要访问的页面路径（配合 chatbot base 使用）。
+	ChatbotPath = "/chatbot"
+	// ChatbotAppType Chatbot 页面要求的固定参数。
+	ChatbotAppType = "assistants"
 )
 
 // 流式事件 from 取值：标识消息来自哪个推理阶段，前端可据此分阶段展示。
@@ -430,4 +442,96 @@ func (c *Client) ResolveAgentID(ctx context.Context, keyword string) (string, er
 		}
 	}
 	return "", fmt.Errorf("未找到可调用的智能体（关键词: %s）", keyword)
+}
+
+// ---------- Chatbot 扩展插件（小恒插件）----------
+
+// genericResponse 用于 data 形态各异的接口（字符串 token / 布尔 / null）。
+type genericResponse struct {
+	Code Code            `json:"code"`
+	Msg  string          `json:"msg"`
+	Flag flexInt         `json:"flag"`
+	Data json.RawMessage `json:"data"`
+}
+
+// callGeneric 发送请求并校验 code，返回 data 原文。
+func (c *Client) callGeneric(ctx context.Context, path string, body any) (json.RawMessage, error) {
+	resp, err := c.doPost(ctx, path, body, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, fmt.Errorf("读取响应失败: %w", err)
+	}
+	var out genericResponse
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("解析响应失败: %w（原文: %s）", err, truncate(string(raw), 200))
+	}
+	if !out.Code.OK() {
+		// flag=2 表示服务端异常、应等待后重试；一并带出来，便于上层决定是否重试
+		return nil, fmt.Errorf("恒脑接口失败（code=%s flag=%d）: %s", out.Code, int(out.Flag), out.Msg)
+	}
+	return out.Data, nil
+}
+
+// GetAssistantToken 获取 Chatbot iframe 的访问凭证 token。
+//
+// userId 是"集成方用户的唯一标识"——即在我们系统里的用户身份，
+// 恒脑用它来隔离各用户的会话。**appSecret 只在这里本地签名，不下发给前端**。
+func (c *Client) GetAssistantToken(ctx context.Context, userID string) (string, error) {
+	if strings.TrimSpace(userID) == "" {
+		return "", fmt.Errorf("userId 不能为空（需为集成方用户唯一标识）")
+	}
+	data, err := c.callGeneric(ctx, PathAssistantToken, map[string]string{"userId": userID})
+	if err != nil {
+		return "", err
+	}
+	var token string
+	if err := json.Unmarshal(data, &token); err != nil {
+		return "", fmt.Errorf("解析 token 失败: %w（原文: %s）", err, truncate(string(data), 120))
+	}
+	if token == "" {
+		return "", fmt.Errorf("平台返回了空 token")
+	}
+	return token, nil
+}
+
+// DelAssistantToken 注销 token（用户登出时调用，避免凭证悬挂）。
+func (c *Client) DelAssistantToken(ctx context.Context, token string) error {
+	if token == "" {
+		return nil
+	}
+	_, err := c.callGeneric(ctx, PathAssistantTokenDel, map[string]string{"token": token})
+	return err
+}
+
+// CheckAssistantToken 校验 token 是否有效，refresh=true 时会续期。
+func (c *Client) CheckAssistantToken(ctx context.Context, token string, refresh bool) (bool, error) {
+	if token == "" {
+		return false, nil
+	}
+	data, err := c.callGeneric(ctx, PathAssistantTokenCheck, map[string]any{"token": token, "refresh": refresh})
+	if err != nil {
+		return false, err
+	}
+	var valid bool
+	if err := json.Unmarshal(data, &valid); err != nil {
+		return false, fmt.Errorf("解析校验结果失败: %w（原文: %s）", err, truncate(string(data), 120))
+	}
+	return valid, nil
+}
+
+// ChatbotURL 拼装 Chatbot iframe 地址。
+//
+// chatbotBase 是插件宿主（形如 https://gc.das-ai.com:9094），来自平台的"小恒插件集成"信息；
+// 注意它与开放服务地址（www.das-ai.com）**不是同一个域**，需分别配置。
+func ChatbotURL(chatbotBase, token string) string {
+	base := strings.TrimRight(strings.TrimSpace(chatbotBase), "/")
+	if base == "" || token == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s%s?appType=%s&token=%s", base, ChatbotPath, ChatbotAppType, url.QueryEscape(token))
 }

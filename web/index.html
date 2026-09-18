@@ -785,6 +785,7 @@
             <div class="nav-item" data-section="tickets">工单管理</div>
                     <div class="nav-item" data-section="aimodels">AI 模型</div>
                     <div class="nav-item" data-section="inspections">AI 巡检</div>
+                    <div class="nav-item" data-section="henghao">恒脑助手</div>
                     <div class="nav-item log-section" data-section="logs">系统日志</div>
                     <div class="nav-item admin-section" data-section="admin">用户管理</div>
         </nav>
@@ -1218,6 +1219,22 @@
                     </tbody>
                 </table>
             </div>
+        </section>
+
+        <!-- 恒脑安全智能体（《企业命题》答题要求⑥：智能体可在恒脑安全智能体平台中运行）
+             对话窗由恒脑「小恒插件」提供；凭证由本服务端签名换取，appSecret 不下发浏览器。 -->
+        <section id="henghao" class="section">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                <h2 style="margin:0;">恒脑安全智能体</h2>
+                <button class="btn btn-secondary" onclick="reloadHengnaoChatbot()" style="font-size:13px;">重新连接</button>
+            </div>
+            <p style="color:#64748b;font-size:13px;margin:0 0 16px;">
+                下方对话窗由恒脑安全智能体平台提供。凭证由本服务端用 appKey/appSecret 签名换取，
+                <strong>appSecret 不会下发到浏览器</strong>；会话按当前登录用户隔离。
+            </p>
+            <div id="henghaoHint" style="padding:24px;text-align:center;color:#64748b;font-size:13px;">正在准备…</div>
+            <iframe id="henghaoFrame" title="恒脑安全智能体对话窗"
+                    style="display:none;width:100%;height:calc(100vh - 280px);min-height:520px;border:0;border-radius:12px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.08);"></iframe>
         </section>
         
         <!-- Footer -->
@@ -1818,6 +1835,43 @@
                 }
             }
             
+            // ============================================================
+            // 恒脑安全智能体接入（答题要求⑥）
+            // 安全约束：appSecret 只留在服务端。前端先向后端换取短期 token，
+            // 再拿后端拼好的 chatbot_url 作为 iframe 地址——绝不能在前端生成签名。
+            // ============================================================
+            let hengnaoLoaded = false;
+            let hengnaoToken = null;
+
+            async function loadHengnaoChatbot(force) {
+                const frame = document.getElementById('henghaoFrame');
+                const hint = document.getElementById('henghaoHint');
+                if (!frame || !hint) return;
+                if (hengnaoLoaded && !force) return;
+                hint.style.display = 'block';
+                hint.textContent = '正在获取恒脑对话凭证…';
+                frame.style.display = 'none';
+                try {
+                    const res = await apiRequest('/henghao/chatbot/token', { method: 'POST' });
+                    if (!res || !res.chatbot_url) throw new Error('后端未返回嵌入地址');
+                    hengnaoToken = res.token || null;
+                    frame.src = res.chatbot_url;
+                    frame.style.display = 'block';
+                    hint.style.display = 'none';
+                    hengnaoLoaded = true;
+                } catch (err) {
+                    hint.innerHTML = '<div style="color:#ef4444;margin-bottom:8px;">恒脑对话窗加载失败：'
+                        + escapeHtml(err && err.message ? err.message : String(err)) + '</div>'
+                        + '<div style="opacity:.75;font-size:12px;">请确认后端已配置 henghao 段'
+                        + '（app_key / app_secret / chatbot_base_url），且凭据在有效期内。</div>';
+                }
+            }
+
+            function reloadHengnaoChatbot() {
+                hengnaoLoaded = false;
+                loadHengnaoChatbot(true);
+            }
+
             // Navigation
             document.querySelectorAll('.nav-item').forEach(item => {
                 item.addEventListener('click', () => {
@@ -1850,6 +1904,10 @@
                         startLogStream();
                     } else {
                         stopLogStream();
+                    }
+                    // 切到恒脑助手页时惰性换取对话凭证（只换一次，重进不重复申请）
+                    if (item.dataset.section === 'henghao') {
+                        loadHengnaoChatbot();
                     }
                 });
             });

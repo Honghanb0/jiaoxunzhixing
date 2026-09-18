@@ -297,3 +297,98 @@ func TestSearch_RealWorldShape(t *testing.T) {
 		t.Errorf("ResolveAgentID 结果错误: %q", id)
 	}
 }
+
+// TestChatbotURL 校验 iframe 地址拼装（含 token 转义）。
+func TestChatbotURL(t *testing.T) {
+	got := ChatbotURL("https://gc.das-ai.com:9094/", "eyJhbGci+Oi/x=")
+	want := "https://gc.das-ai.com:9094/chatbot?appType=assistants&token=eyJhbGci%2BOi%2Fx%3D"
+	if got != want {
+		t.Errorf("ChatbotURL 拼装错误:\n got=%q\nwant=%q", got, want)
+	}
+	// 缺任一项都返回空串，避免前端嵌出一个坏 iframe
+	if ChatbotURL("", "tok") != "" || ChatbotURL("https://x", "") != "" {
+		t.Error("base 或 token 为空时应返回空串")
+	}
+}
+
+// TestAssistantToken_Mock 覆盖 token 获取 / 校验 / 注销三个接口的解析。
+func TestAssistantToken_Mock(t *testing.T) {
+	var gotPaths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPaths = append(gotPaths, r.URL.Path)
+		switch r.URL.Path {
+		case PathAssistantToken:
+			var body map[string]string
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if body["userId"] == "" {
+				fmt.Fprint(w, `{"code":-1,"msg":"userId 不能为空"}`)
+				return
+			}
+			fmt.Fprint(w, `{"code":0,"msg":"成功","data":"eyJhbGciOiJIUzI1NiJ9.tok"}`)
+		case PathAssistantTokenCheck:
+			fmt.Fprint(w, `{"code":0,"msg":"成功","data":true}`)
+		case PathAssistantTokenDel:
+			fmt.Fprint(w, `{"code":0,"msg":"成功","data":null}`)
+		default:
+			t.Errorf("未预期的路径: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewClient(Config{BaseURL: srv.URL, AppKey: "ak", AppSecret: "sk"})
+	ctx := context.Background()
+
+	// 1) 获取 token：data 是裸字符串
+	tok, err := c.GetAssistantToken(ctx, "user-123")
+	if err != nil {
+		t.Fatalf("GetAssistantToken 失败: %v", err)
+	}
+	if tok != "eyJhbGciOiJIUzI1NiJ9.tok" {
+		t.Errorf("token 解析错误: %q", tok)
+	}
+
+	// userId 为空应前置拦截，不发起请求
+	if _, err := c.GetAssistantToken(ctx, "  "); err == nil {
+		t.Error("userId 为空应报错")
+	}
+
+	// 2) 校验：data 是布尔
+	ok, err := c.CheckAssistantToken(ctx, tok, true)
+	if err != nil || !ok {
+		t.Errorf("CheckAssistantToken 失败: ok=%v err=%v", ok, err)
+	}
+	if ok, err := c.CheckAssistantToken(ctx, "", false); err != nil || ok {
+		t.Errorf("空 token 应返回 false 且无错误: ok=%v err=%v", ok, err)
+	}
+
+	// 3) 注销：data 为 null 也要能正常返回
+	if err := c.DelAssistantToken(ctx, tok); err != nil {
+		t.Errorf("DelAssistantToken 失败: %v", err)
+	}
+	if err := c.DelAssistantToken(ctx, ""); err != nil {
+		t.Errorf("空 token 注销应为 no-op: %v", err)
+	}
+
+	// 三个接口都应被真实调用到（除空参数短路外）
+	if len(gotPaths) < 3 {
+		t.Errorf("接口调用次数偏少，实际路径: %v", gotPaths)
+	}
+}
+
+// TestAssistantToken_ErrorFlag 平台用 flag 区分「可跳过」与「需重试」，
+// 出错时错误信息里应带上 flag，便于上层决策。
+func TestAssistantToken_ErrorFlag(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"msg":"签名验证失败，请查看本地服务器时间是否正确","code":-402,"flag":2,"data":null}`)
+	}))
+	defer srv.Close()
+
+	c := NewClient(Config{BaseURL: srv.URL, AppKey: "ak", AppSecret: "sk"})
+	_, err := c.GetAssistantToken(context.Background(), "u1")
+	if err == nil {
+		t.Fatal("失败码应返回错误")
+	}
+	if !strings.Contains(err.Error(), "-402") || !strings.Contains(err.Error(), "flag=2") {
+		t.Errorf("错误信息应包含 code 与 flag，实际: %v", err)
+	}
+}

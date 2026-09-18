@@ -89,6 +89,7 @@ func NewServerWithEngine(cfg *config.Config, store *storage.Neo4jStore, engine *
 	logHandler := NewLogHandler()
 	assetHandler := NewAssetHandler(engine)
 	retestHandler := NewRetestHandler(engine, vulnRepo)
+	henghaoHandler := NewHengnaoHandler(&cfg.Hengnao)
 	// engine 为 nil 时基线能力不可用（例如仅构造 HTTP 层做单测），此时不注册相关路由。
 	var baselineHandler *BaselineHandler
 	if engine != nil {
@@ -164,6 +165,15 @@ func NewServerWithEngine(cfg *config.Config, store *storage.Neo4jStore, engine *
 		{
 			vulns.GET("/:id", retestHandler.Get)
 			vulns.POST("/:id/retest", RequireRoleLevel(models.RoleLevelScanner), retestHandler.Retest)
+		}
+
+		// 恒脑安全智能体平台接入（答题要求⑥）：
+		// 前端只拿短期 token，appSecret 始终留在服务端。
+		henghaoGroup := protected.Group("/henghao")
+		{
+			henghaoGroup.GET("/status", henghaoHandler.Status)
+			henghaoGroup.POST("/chatbot/token", henghaoHandler.GetChatbotToken)
+			henghaoGroup.POST("/chatbot/logout", henghaoHandler.LogoutChatbot)
 		}
 
 		admin := protected.Group("/admin")

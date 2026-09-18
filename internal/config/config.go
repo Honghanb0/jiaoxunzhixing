@@ -39,8 +39,13 @@ type HengnaoConfig struct {
 	BaseURL   string `mapstructure:"base_url"`   // 开放服务地址，默认 https://www.das-ai.com
 	AppKey    string `mapstructure:"app_key"`    // 凭据 appKey
 	AppSecret string `mapstructure:"app_secret"` // 凭据 appSecret（仅本地签名用）
-	AgentID   string `mapstructure:"agent_id"`   // 默认智能体 ID
+	AgentID   string `mapstructure:"agent_id"`   // 默认智能体 ID（**必须是 /agent/search 返回的 UUID**）
 	TimeoutMs int    `mapstructure:"timeout_ms"` // 单次执行超时（毫秒）
+
+	// ChatbotBaseURL 是「小恒插件」（Chatbot 扩展插件）的宿主地址，
+	// 用于把恒脑对话窗以 iframe 嵌进我们的前端。
+	// 注意：它与开放服务地址不是同一个域（平台给的形如 https://gc.das-ai.com:9094）。
+	ChatbotBaseURL string `mapstructure:"chatbot_base_url"`
 }
 
 // AgentConfig 自主智能体（多轮工具调用 + 自主规划）配置。
@@ -364,6 +369,7 @@ func Load(configPath string) (*Config, error) {
 	hn.AppKey = resolveEnvVar(strings.TrimSpace(hn.AppKey))
 	hn.AppSecret = resolveEnvVar(strings.TrimSpace(hn.AppSecret))
 	hn.AgentID = resolveEnvVar(strings.TrimSpace(hn.AgentID))
+	hn.ChatbotBaseURL = strings.TrimRight(resolveEnvVar(strings.TrimSpace(hn.ChatbotBaseURL)), "/")
 	if hn.TimeoutMs <= 0 {
 		hn.TimeoutMs = 60000 // 智能体执行通常比普通 API 慢，默认给 60s
 	}
