@@ -1,4 +1,4 @@
-// Package henghao 封装恒脑安全智能体平台（gc.das-ai.com）的「开放服务接口」。
+// Package henghao 封装恒脑安全智能体平台的「开放服务接口」。
 //
 // 与 internal/ai 下的 LLM Provider 刻意分开：恒脑对外提供的是**智能体执行**能力
 // （POST /open/api/v2/agent/execute，按 agent id 执行，返回会话记录与结构化 results），
@@ -24,11 +24,35 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+// Code 是响应里的状态码。
+//
+// 这里刻意不用 string：平台**文档写的是字符串**（`{"code":"0"}`），
+// 但**真实响应返回的是数字**（实测 `{"code":0,"msg":"恭喜您，操作成功"}`）。
+// 若按文档声明成 string，json.Unmarshal 在真机上会直接报
+// "cannot unmarshal number into Go struct field ... of type string"。
+// 用自定义类型同时接受两种形态，避免被「文档与实现不一致」坑到。
+type Code string
+
+// UnmarshalJSON 同时接受 0 / "0" / null。
+func (c *Code) UnmarshalJSON(b []byte) error {
+	s := strings.TrimSpace(string(b))
+	if s == "null" {
+		*c = ""
+		return nil
+	}
+	*c = Code(strings.Trim(s, `"`))
+	return nil
+}
+
+// OK 判断是否为成功码（平台约定 0 成功）。
+func (c Code) OK() bool { return c == "" || c == "0" }
 
 // 开放服务接口路径（与平台文档一致）
 const (
@@ -66,7 +90,7 @@ func Sign(appKey, appSecret string, timestampMs int64) string {
 
 // Config 恒脑开放服务配置。
 type Config struct {
-	BaseURL   string        // 平台地址，如 https://gc.das-ai.com
+	BaseURL   string        // 平台地址（开放服务接口在 www.das-ai.com，与门户 gc.das-ai.com 不同域）
 	AppKey    string        // 凭据 appKey
 	AppSecret string        // 凭据 appSecret（不随请求发送，仅用于本地签名）
 	AgentID   string        // 默认智能体 ID（可在单次请求中覆盖）
@@ -132,7 +156,7 @@ type ExecuteData struct {
 
 // ExecuteResponse 非流式执行响应。
 type ExecuteResponse struct {
-	Code string      `json:"code"`
+	Code Code        `json:"code"`
 	Msg  string      `json:"msg"`
 	Data ExecuteData `json:"data"`
 }
@@ -154,7 +178,7 @@ type StreamEvent struct {
 
 // streamEnvelope 流式事件的信封（与外层保持相同的 code/msg/data 结构）。
 type streamEnvelope struct {
-	Code string      `json:"code"`
+	Code Code        `json:"code"`
 	Msg  string      `json:"msg"`
 	Data StreamEvent `json:"data"`
 }
@@ -225,7 +249,7 @@ func (c *Client) Execute(ctx context.Context, req ExecuteRequest) (*ExecuteRespo
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return nil, fmt.Errorf("解析响应失败: %w（原文: %s）", err, truncate(string(raw), 200))
 	}
-	if out.Code != "0" {
+	if !out.Code.OK() {
 		return nil, fmt.Errorf("恒脑智能体执行失败（code=%s）: %s", out.Code, out.Msg)
 	}
 	return &out, nil
@@ -279,7 +303,7 @@ func (c *Client) ExecuteStream(ctx context.Context, req ExecuteRequest, onEvent 
 		if err := json.Unmarshal([]byte(payload), &env); err != nil {
 			continue // 容忍单条畸形事件，不因一个分片中断整个流
 		}
-		if env.Code != "" && env.Code != "0" {
+		if !env.Code.OK() {
 			return fmt.Errorf("恒脑智能体执行失败（code=%s）: %s", env.Code, env.Msg)
 		}
 		if err := onEvent(env.Data); err != nil {
@@ -295,4 +319,115 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
+}
+
+// flexInt 兼容「文档写 int、实际返回字符串」的计数字段（如 total 实测为 "1165"）。
+type flexInt int
+
+func (n *flexInt) UnmarshalJSON(b []byte) error {
+	s := strings.Trim(strings.TrimSpace(string(b)), `"`)
+	if s == "" || s == "null" {
+		*n = 0
+		return nil
+	}
+	v, err := strconv.Atoi(s)
+	if err != nil {
+		*n = 0 // 统计字段解析失败不该中断主流程
+		return nil
+	}
+	*n = flexInt(v)
+	return nil
+}
+
+// SearchRequest 智能体查询入参。
+type SearchRequest struct {
+	Keyword    string `json:"keyword,omitempty"`    // 按名称 / 介绍 / 智能体 ID 模糊搜索
+	Scope      int    `json:"scope,omitempty"`      // 0 全部 / 1 仅官方 / 2 非官方
+	WithForbid bool   `json:"withForbid,omitempty"` // 是否包含未授权项（默认 false，仅返回有权限的）
+	Page       int    `json:"page,omitempty"`
+	Size       int    `json:"size,omitempty"`
+}
+
+// AgentBrief 智能体摘要。
+//
+// 名称字段的坑：文档写的是 title，但**线上实测返回的是 name**（title 为空串）。
+// 两个都收，取用时以 Name 优先（见 DisplayName）。
+type AgentBrief struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`   // 线上真实字段
+	Title    string `json:"title"`  // 文档字段（部分场景返回）
+	Forbid   bool   `json:"forbid"` // true = 当前凭据无权限调用
+	Type     int    `json:"type"`
+	Prologue string `json:"prologue"`
+}
+
+// DisplayName 返回可展示的名称，兼容 name / title 两种返回。
+func (a AgentBrief) DisplayName() string {
+	if a.Name != "" {
+		return a.Name
+	}
+	return a.Title
+}
+
+type searchData struct {
+	Total flexInt      `json:"total"`
+	Page  flexInt      `json:"page"`
+	Size  flexInt      `json:"size"`
+	Data  []AgentBrief `json:"data"`
+}
+
+type searchResponse struct {
+	Code Code       `json:"code"`
+	Msg  string     `json:"msg"`
+	Data searchData `json:"data"`
+}
+
+// Search 查询当前凭据可调用的智能体。
+//
+// ⚠️ 关键：`/agent/execute` 的 id **必须是本方法返回的 id（UUID 形态）**，
+// 而不是平台界面 URL 里那串 19 位数字 id —— 那是草稿/内部 id，
+// 直接传进去会返回 `code=-16 无权限使用智能体`（实测踩过）。
+// 配置 henghao.agent_id 前，先用本方法确认真实 id。
+//
+// WithForbid=false 时只返回**有权限**的智能体；置 true 可用 Forbid 字段区分。
+func (c *Client) Search(ctx context.Context, req SearchRequest) ([]AgentBrief, int, error) {
+	if req.Page <= 0 {
+		req.Page = 1
+	}
+	if req.Size <= 0 {
+		req.Size = 20
+	}
+	resp, err := c.doPost(ctx, PathSearch, req, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return nil, 0, fmt.Errorf("读取响应失败: %w", err)
+	}
+	var out searchResponse
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, 0, fmt.Errorf("解析响应失败: %w（原文: %s）", err, truncate(string(raw), 200))
+	}
+	if !out.Code.OK() {
+		return nil, 0, fmt.Errorf("恒脑智能体查询失败（code=%s）: %s", out.Code, out.Msg)
+	}
+	return out.Data.Data, int(out.Data.Total), nil
+}
+
+// ResolveAgentID 按名称解析出可调用的智能体 ID（UUID）。
+// 常用于把配置里的"人能看懂的名称"换成接口真正需要的 id。
+func (c *Client) ResolveAgentID(ctx context.Context, keyword string) (string, error) {
+	agents, _, err := c.Search(ctx, SearchRequest{Keyword: keyword, Size: 20})
+	if err != nil {
+		return "", err
+	}
+	for _, a := range agents {
+		if !a.Forbid && a.ID != "" {
+			return a.ID, nil
+		}
+	}
+	return "", fmt.Errorf("未找到可调用的智能体（关键词: %s）", keyword)
 }

@@ -134,7 +134,7 @@ agent:
 # 切勿把 app_secret 提交进版本库，用环境变量注入。
 henghao:
   enabled: true
-  base_url: "https://gc.das-ai.com"   # 平台地址
+  base_url: "https://www.das-ai.com"   # 开放服务接口地址（注意：不是门户 gc.das-ai.com）
   app_key: "${HENGNAO_APP_KEY}"       # 凭据 appKey
   app_secret: "${HENGNAO_APP_SECRET}" # 凭据 appSecret（仅本地签名用，不随请求发送）
   agent_id: "${HENGNAO_AGENT_ID}"     # 默认智能体 ID（平台智能体详情里可查）

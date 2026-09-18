@@ -207,3 +207,93 @@ func TestCredentialsReady(t *testing.T) {
 		t.Error("凭据齐全时应判定为就绪")
 	}
 }
+
+// TestCode_DocVsRealWorld 覆盖一个真实的坑：
+//
+// 平台文档写 `{"code":"0"}`（字符串），但**线上实测返回 `{"code":0}`（数字）**。
+// 若按文档把 Code 声明成 string，真机上 json.Unmarshal 会直接失败。
+// 这里两种形态都必须能解析。
+func TestCode_DocVsRealWorld(t *testing.T) {
+	parse := func(raw string) (ExecuteResponse, error) {
+		var r ExecuteResponse
+		err := json.Unmarshal([]byte(raw), &r)
+		return r, err
+	}
+
+	// 线上真实形态：数字 code
+	real, err := parse(`{"msg":"恭喜您，操作成功","code":0,"data":{"token_usage":{"prompt_tokens":41,"completion_tokens":3,"total_tokens":44}}}`)
+	if err != nil {
+		t.Fatalf("解析线上数字 code 失败: %v", err)
+	}
+	if !real.Code.OK() {
+		t.Errorf("数字 0 应判定为成功，实际 code=%q", real.Code)
+	}
+	if real.Data.TokenUsage.TotalTokens != 44 {
+		t.Errorf("token_usage 解析错误: %+v", real.Data.TokenUsage)
+	}
+
+	// 文档形态：字符串 code
+	doc, err := parse(`{"code":"0","msg":"成功"}`)
+	if err != nil {
+		t.Fatalf("解析文档字符串 code 失败: %v", err)
+	}
+	if !doc.Code.OK() {
+		t.Errorf("字符串 \"0\" 应判定为成功，实际 code=%q", doc.Code)
+	}
+
+	// 线上真实错误码：数字 -16（无权限）
+	bad, err := parse(`{"code":-16,"msg":"异常：无权限使用智能体"}`)
+	if err != nil {
+		t.Fatalf("解析数字错误码失败: %v", err)
+	}
+	if bad.Code.OK() {
+		t.Errorf("数字 -16 不应判定为成功，实际 code=%q", bad.Code)
+	}
+}
+
+// TestSearch_RealWorldShape 用线上真实响应结构验证搜索解析。
+// 注意两点真实差异：列表在 data.data（不是 data.list）；total 是字符串 "1165"。
+func TestSearch_RealWorldShape(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != PathSearch {
+			t.Errorf("请求路径错误: %s", r.URL.Path)
+		}
+		fmt.Fprint(w, `{"msg":"成功","code":0,"flag":0,"data":{"total":"1165","size":5,"page":1,
+			"data":[
+				{"id":"db0ae189-b3df-b8ac-714c-2f2329524ca0","name":"交巡智星-连通性测试","title":"","forbid":false,"type":1},
+				{"id":"1da3469f-233c-486d-a6de-13b666050d46","name":"告警研判智能体","forbid":true,"type":1}
+			]}}`)
+	}))
+	defer srv.Close()
+
+	c := NewClient(Config{BaseURL: srv.URL, AppKey: "ak", AppSecret: "sk"})
+	agents, total, err := c.Search(context.Background(), SearchRequest{Keyword: "交巡智星"})
+	if err != nil {
+		t.Fatalf("Search 失败: %v", err)
+	}
+	if total != 1165 {
+		t.Errorf("total 应能解析字符串 \"1165\"，实际 %d", total)
+	}
+	if len(agents) != 2 {
+		t.Fatalf("智能体条数错误: %d", len(agents))
+	}
+	if agents[0].ID != "db0ae189-b3df-b8ac-714c-2f2329524ca0" || agents[0].Forbid {
+		t.Errorf("首条解析错误: %+v", agents[0])
+	}
+	if !agents[1].Forbid {
+		t.Error("forbid=true 的智能体应被正确标记")
+	}
+	// 名称字段线上是 name（文档写 title）——必须能取到
+	if agents[0].DisplayName() != "交巡智星-连通性测试" {
+		t.Errorf("DisplayName 应兼容 name 字段，实际 %q", agents[0].DisplayName())
+	}
+
+	// ResolveAgentID 必须跳过无权限的，取第一个可用的
+	id, err := c.ResolveAgentID(context.Background(), "交巡智星")
+	if err != nil {
+		t.Fatalf("ResolveAgentID 失败: %v", err)
+	}
+	if id != "db0ae189-b3df-b8ac-714c-2f2329524ca0" {
+		t.Errorf("ResolveAgentID 结果错误: %q", id)
+	}
+}

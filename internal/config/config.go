@@ -36,7 +36,7 @@ type Config struct {
 // （建议用 ${HENGNAO_APP_SECRET} 从环境变量注入）。
 type HengnaoConfig struct {
 	Enabled   bool   `mapstructure:"enabled"`
-	BaseURL   string `mapstructure:"base_url"`   // 平台地址，默认 https://gc.das-ai.com
+	BaseURL   string `mapstructure:"base_url"`   // 开放服务地址，默认 https://www.das-ai.com
 	AppKey    string `mapstructure:"app_key"`    // 凭据 appKey
 	AppSecret string `mapstructure:"app_secret"` // 凭据 appSecret（仅本地签名用）
 	AgentID   string `mapstructure:"agent_id"`   // 默认智能体 ID
@@ -359,7 +359,7 @@ func Load(configPath string) (*Config, error) {
 	hn := &cfg.Hengnao
 	hn.BaseURL = strings.TrimRight(resolveEnvVar(strings.TrimSpace(hn.BaseURL)), "/")
 	if hn.BaseURL == "" {
-		hn.BaseURL = "https://gc.das-ai.com"
+		hn.BaseURL = "https://www.das-ai.com"
 	}
 	hn.AppKey = resolveEnvVar(strings.TrimSpace(hn.AppKey))
 	hn.AppSecret = resolveEnvVar(strings.TrimSpace(hn.AppSecret))
