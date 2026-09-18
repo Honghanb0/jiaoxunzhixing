@@ -24,6 +24,23 @@ type Config struct {
 	Logging   LoggingConfig   `mapstructure:"logging"`
 	Auth      AuthConfig      `mapstructure:"auth"`
 	Agent     AgentConfig     `mapstructure:"agent"`
+	// Hengnao 恒脑安全智能体平台「开放服务」接入配置。
+	// 对应《企业命题》答题要求⑥「智能体可在恒脑安全智能体平台中运行」。
+	Hengnao HengnaoConfig `mapstructure:"henghao"`
+}
+
+// HengnaoConfig 恒脑开放服务接入配置。
+//
+// 凭据来自平台：右上角用户菜单 → 我的凭据 → 创建凭据（授权方式 Service Token / API Key）。
+// appSecret 仅用于本地签名，绝不随请求发送，也不要提交进版本库
+// （建议用 ${HENGNAO_APP_SECRET} 从环境变量注入）。
+type HengnaoConfig struct {
+	Enabled   bool   `mapstructure:"enabled"`
+	BaseURL   string `mapstructure:"base_url"`   // 平台地址，默认 https://gc.das-ai.com
+	AppKey    string `mapstructure:"app_key"`    // 凭据 appKey
+	AppSecret string `mapstructure:"app_secret"` // 凭据 appSecret（仅本地签名用）
+	AgentID   string `mapstructure:"agent_id"`   // 默认智能体 ID
+	TimeoutMs int    `mapstructure:"timeout_ms"` // 单次执行超时（毫秒）
 }
 
 // AgentConfig 自主智能体（多轮工具调用 + 自主规划）配置。
@@ -336,6 +353,24 @@ func Load(configPath string) (*Config, error) {
 
 	// JWT 密钥同样支持 ${ENV} 占位符（如从 JWT_SECRET 注入，避免明文落盘）
 	cfg.Auth.JwtSecret = resolveEnvVar(cfg.Auth.JwtSecret)
+
+	// 恒脑安全智能体平台「开放服务」接入（答题要求⑥：智能体可在恒脑平台中运行）
+	// appSecret 同样支持 ${ENV} 注入，避免明文落盘/入库。
+	hn := &cfg.Hengnao
+	hn.BaseURL = strings.TrimRight(resolveEnvVar(strings.TrimSpace(hn.BaseURL)), "/")
+	if hn.BaseURL == "" {
+		hn.BaseURL = "https://gc.das-ai.com"
+	}
+	hn.AppKey = resolveEnvVar(strings.TrimSpace(hn.AppKey))
+	hn.AppSecret = resolveEnvVar(strings.TrimSpace(hn.AppSecret))
+	hn.AgentID = resolveEnvVar(strings.TrimSpace(hn.AgentID))
+	if hn.TimeoutMs <= 0 {
+		hn.TimeoutMs = 60000 // 智能体执行通常比普通 API 慢，默认给 60s
+	}
+	// 未显式配置 enabled 时：只要凭据齐全就视为启用，避免"配了却忘了开"
+	if !v.IsSet("henghao.enabled") {
+		hn.Enabled = hn.AppKey != "" && hn.AppSecret != ""
+	}
 
 	GlobalConfig = &cfg
 	return &cfg, nil

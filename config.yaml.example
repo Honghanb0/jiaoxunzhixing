@@ -126,3 +126,16 @@ agent:
   enabled: true        # 是否启用自主智能体
   max_turns: 24        # 单任务最大推理轮次（达到上限仍未完成则标记 failed，防失控）
   model: ""            # 可选：覆盖默认模型供应商（留空则用 ai.default）
+
+# 恒脑安全智能体平台「开放服务」接入
+# 对应《企业命题·赛道2》答题要求⑥：智能体可在恒脑安全智能体平台中运行。
+# 凭据获取：平台右上角用户菜单 →「我的凭据」→「创建凭据」
+#   授权方式选 Service Token，具体方式选 API Key。
+# 切勿把 app_secret 提交进版本库，用环境变量注入。
+henghao:
+  enabled: true
+  base_url: "https://gc.das-ai.com"   # 平台地址
+  app_key: "${HENGNAO_APP_KEY}"       # 凭据 appKey
+  app_secret: "${HENGNAO_APP_SECRET}" # 凭据 appSecret（仅本地签名用，不随请求发送）
+  agent_id: "${HENGNAO_AGENT_ID}"     # 默认智能体 ID（平台智能体详情里可查）
+  timeout_ms: 60000                   # 单次智能体执行超时（毫秒）
