@@ -1855,9 +1855,21 @@
                     const res = await apiRequest('/henghao/chatbot/token', { method: 'POST' });
                     if (!res || !res.chatbot_url) throw new Error('后端未返回嵌入地址');
                     hengnaoToken = res.token || null;
+                    // iframe 是跨域的，加载失败时前端拿不到任何错误信息（onerror 不触发），
+                    // 只会是一个空白框。所以这里用"超时未 load"来兜底提示，
+                    // 把最常见的失败原因（插件宿主在当前网络不可达）明确说出来。
+                    let loaded = false;
+                    frame.onload = () => { loaded = true; clearTimeout(watchdog); hint.style.display = 'none'; };
+                    const watchdog = setTimeout(() => {
+                        if (loaded) return;
+                        hint.style.display = 'block';
+                        hint.innerHTML = '<div style="color:#f59e0b;margin-bottom:8px;">对话窗未在预期时间内加载完成。</div>'
+                            + '<div style="opacity:.75;font-size:12px;">常见原因：当前网络无法访问小恒插件宿主 '
+                            + escapeHtml(res.chatbot_url.split('/chatbot')[0])
+                            + '（该地址通常仅教育网/内网可达）。可在校网或 VPN 环境下重试。</div>';
+                    }, 12000);
                     frame.src = res.chatbot_url;
                     frame.style.display = 'block';
-                    hint.style.display = 'none';
                     hengnaoLoaded = true;
                 } catch (err) {
                     hint.innerHTML = '<div style="color:#ef4444;margin-bottom:8px;">恒脑对话窗加载失败：'
