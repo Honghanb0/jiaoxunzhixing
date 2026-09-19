@@ -259,7 +259,8 @@ func NewServerWithEngine(cfg *config.Config, store *storage.Neo4jStore, engine *
 	if cfg.OpenService.Enabled && agentMgr != nil {
 		openTools := NewOpenToolsHandler(agentMgr.Registry(), &cfg.OpenService)
 		open := router.Group("/api/open")
-		open.Use(RequireServiceKey(&cfg.OpenService))
+		// 审计放在鉴权之前：这样未授权的访问尝试也会被记录下来（安全上更有价值）
+		open.Use(AuditOpenService(&cfg.OpenService), RequireServiceKey(&cfg.OpenService))
 		{
 			open.GET("/tools", openTools.ListTools)
 			open.POST("/tools/:name", openTools.Execute)

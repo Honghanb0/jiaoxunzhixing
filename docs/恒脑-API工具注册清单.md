@@ -1,4 +1,5 @@
 # 恒脑「API 工具」注册清单
+
 > 由线上 `/api/open/tools` 实时生成，共 **27** 个工具。
 
 ## 一、这份清单是干什么的
@@ -6,30 +7,68 @@
 把本平台的智能体工具注册成恒脑的「API 工具」，恒脑侧编排的智能体就能调用我们的
 扫描 / 检索能力（对应《企业命题》答题要求⑥ 的编排侧落地）。
 
-**注册路径**：恒脑平台 → 安全智能体开发 → **API工具** → 创建 → 逐个按下表填写。
+## 二、⚠️ 关键概念（实测踩出来的，务必先读）
 
-## 二、统一配置（每个工具都一样）
+**恒脑的模型是「一个 API 工具 = 一个服务」，工具里再分「能力」= 一个个接口。**
 
-| 配置项 | 值 |
+| 项 | 结论 |
 |---|---|
-| 请求地址 | `http://124.221.227.243/api/open/tools/<工具名>` |
-| 请求方法 | `POST` |
-| Content-Type | `application/json` |
-| 鉴权请求头 | `X-API-Key: <服务密钥>` |
+| 请求地址 | **只能填基础地址，不能带路径**（带路径会报"请求地址不能包含路径"）|
+| 接口路径 | 在「能力」里单独填，如 `/api/open/tools/list_domains` |
+| 能力数量上限 | **每个 API 工具最多 20 个能力** → 本清单 27 个工具需拆成 **2 个 API 工具** |
+| 能力导入 | 支持**粘贴 cURL 命令**自动填充路径/方法/请求头，是最快的注册方式 |
+| 调试状态 | 走完 3 步向导会自动真实调用一次并填入输出参数——**绿勾即代表已打通** |
 
-> **服务密钥**：由部署方在 `config.yaml` 的 `open_service.api_key` 配置
-> （推荐用环境变量 `OPEN_SERVICE_API_KEY` 注入）。
-> 出于安全考虑不在本文档中明文给出，向部署同学索取。
->
-> ⚠️ 密钥与平台用户 JWT 是**两套鉴权**：前者面向机器调用（恒脑），后者面向前端用户。
+## 三、注册步骤（已实测跑通）
 
-**请求体**：该工具的入参 JSON 对象（见下表「入参」列），无参工具传 `{}`。
+1. 恒脑 → 安全智能体开发 → **API工具** → **创建**
+2. 填写：名称（如「交巡智星-巡检工具」）、描述、**请求地址填 `http://124.221.227.243`**（不带路径）
+3. 点 **保存并配置能力** → 进入「工具能力配置」
+4. 点 **能力导入**，粘贴下面这条 cURL（把 `<服务密钥>` 换成真实值）：
+
+   ```bash
+   curl -X POST 'http://124.221.227.243/api/open/tools/list_domains' \
+     -H 'Content-Type: application/json' \
+     -H 'X-API-Key: <服务密钥>' -d '{}'
+   ```
+
+5. 点 **提交** → 填「能力名称」「能力描述」→ 再 **提交**
+6. 重复 4-5 注册其余能力（**每个 API 工具最多 20 个**，超了就再建一个工具）
+7. 完成后点右上角 **发布**，可见范围选「租户共享」→ 提交
+
+**服务密钥**：由部署方在 `config.yaml` 的 `open_service.api_key` 配置（推荐用环境变量
+`OPEN_SERVICE_API_KEY` 注入）。出于安全考虑不在本文档中明文给出，向部署同学索取。
+
+⚠️ 密钥与平台用户 JWT 是**两套鉴权**：前者面向机器调用（恒脑），后者面向前端用户。
+
+## 四、已验证的链路
+
+实测已跑通（2026-09-19）：
+
+```
+恒脑平台服务器 (183.129.153.157)
+      └─► POST http://124.221.227.243/api/open/tools/list_domains   返回 200
+          └─► 恒脑侧「调试状态」显示绿勾，并自动填入输出参数
+```
+
+对应我们服务器侧审计日志：
+
+```
+[OpenService] POST /api/open/tools/list_domains -> 200 (1ms) ip=183.129.153.157 auth=有
+```
+
+> 该审计日志由 `internal/api/open_audit.go` 输出，可用它排查"恒脑是否真的调过来了"。
+
+## 五、接口约定
+
+**请求**：`POST http://124.221.227.243/api/open/tools/<工具名>`，请求头 `X-API-Key: <服务密钥>`，
+body 为该工具的入参 JSON 对象（无参传 `{}`）。
 
 **响应**：`{"ok":true,"name":"<工具名>","result":"<工具输出>"}`
 或 `{"ok":false,"name":"<工具名>","error":"<失败原因>"}`。
-`result` 是工具输出的文本（通常是 JSON 字符串），可将其作为工具观察结果继续推理。
+`result` 是工具输出的文本（通常是 JSON 字符串），可作为工具观察结果继续推理。
 
-## 三、工具清单
+## 六、工具清单
 
 | # | 工具名 | 说明 | 入参 |
 |---|---|---|---|
@@ -61,21 +100,21 @@
 | 26 | `weak_password_scan` | 对目标服务的弱口令探测：用「用户名×口令」字典发起并发登录尝试，命中即记录有效凭据并默认二次复验。需显式提供 target（host 或 host:port）与 service（ssh/ftp/pop3/smtp/redis/http）。未提供 usernames/passwords 时自动使用内置 users/passwords 字典；可用 use_dict 指定单一字典名。注意：仅可在授权范围内对目标发起探测，禁止对未授权目标扫描。命中结果建议经 create_ticket / send_alert 回写。 | `concurrency`:integer(可选)、`passwords`:array(可选)、`service`:string(可选)、`stop_on_first`:boolean(可选)、`target`:string(可选)、`timeout_sec`:integer(可选)、`use_dict`:string(可选)、`usernames`:array(可选)、`verify`:boolean(可选) |
 | 27 | `verify_credentials` | 对单条「用户名+口令」做有效性验证（确认该凭据能否登录目标服务）。用于复验弱口令扫描的命中项，或人工指定凭据的即时判定。返回 authenticated 布尔与所用 service/target/username。 | `password`:string(可选)、`service`:string(可选)、`target`:string(可选)、`timeout_sec`:integer(可选)、`username`:string(可选) |
 
-## 四、接入状态
+## 七、接入状态
 
-- [x] 后端对外工具服务已实现并通过验证（`GET /api/open/tools`、`POST /api/open/tools/:name`）
-- [x] 服务密钥鉴权（`X-API-Key`，定长比较防时序侧信道）
-- [x] 流程控制类工具默认不外露（`finish_task` / `wait` / `wait_until`，
-      恒脑侧有自己的编排，外露会被误用）
-- [ ] 在恒脑平台逐个注册（需在平台 UI 操作）
+- [x] 后端对外工具服务已实现并验证（`GET /api/open/tools`、`POST /api/open/tools/:name`）
+- [x] 服务密钥鉴权（`X-API-Key`，定长比较防时序侧信道）+ 调用审计日志
+- [x] 流程控制类工具默认不外露（`finish_task` / `wait` / `wait_until`）
+- [x] 恒脑侧已注册并发布 1 个 API 工具 + 1 个能力（`list_domains`），调试状态绿勾、链路打通
+- [ ] 其余工具按上面步骤补齐（每个 API 工具上限 20 个能力）
 
-## 五、验证方法
+## 八、验证方法
 
 ```bash
 # 拉清单
-curl -s http://<部署地址>/api/open/tools -H 'X-API-Key: <服务密钥>'
+curl -s http://124.221.227.243/api/open/tools -H 'X-API-Key: <服务密钥>'
 
 # 执行一个读类工具
-curl -s -X POST http://<部署地址>/api/open/tools/list_domains \
+curl -s -X POST http://124.221.227.243/api/open/tools/list_domains \
   -H 'X-API-Key: <服务密钥>' -H 'Content-Type: application/json' -d '{}'
 ```
