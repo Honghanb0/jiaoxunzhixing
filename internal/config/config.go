@@ -27,6 +27,24 @@ type Config struct {
 	// Hengnao 恒脑安全智能体平台「开放服务」接入配置。
 	// 对应《企业命题》答题要求⑥「智能体可在恒脑安全智能体平台中运行」。
 	Hengnao HengnaoConfig `mapstructure:"henghao"`
+
+	// OpenService 对外工具服务：把本平台的智能体工具以 HTTP 形式开放给第三方平台
+	// （当前用于恒脑的「API 工具」），使第三方智能体能调用我们的扫描/检索能力。
+	OpenService OpenServiceConfig `mapstructure:"open_service"`
+}
+
+// OpenServiceConfig 对外工具服务配置。
+//
+// 与 /api/agent/* 是两套鉴权：这里是**机器调用**，用静态服务密钥，
+// 因此密钥必须足够长且只放在服务端配置里（建议用 ${ENV} 注入，不要入库）。
+type OpenServiceConfig struct {
+	Enabled bool   `mapstructure:"enabled"`
+	APIKey  string `mapstructure:"api_key"` // 服务密钥
+	Header  string `mapstructure:"header"`  // 承载密钥的请求头名，默认 X-API-Key
+	// BlockedTools 禁止外露的工具名。默认屏蔽智能体流程控制类
+	// （finish_task / wait / wait_until）——它们只在自身推理循环里有意义，
+	// 第三方平台有自己的编排，外露反而会让对方误用。
+	BlockedTools []string `mapstructure:"blocked_tools"`
 }
 
 // HengnaoConfig 恒脑开放服务接入配置。
@@ -376,6 +394,25 @@ func Load(configPath string) (*Config, error) {
 	// 未显式配置 enabled 时：只要凭据齐全就视为启用，避免"配了却忘了开"
 	if !v.IsSet("henghao.enabled") {
 		hn.Enabled = hn.AppKey != "" && hn.AppSecret != ""
+	}
+
+	// 对外工具服务：机器调用方用静态服务密钥鉴权。
+	os := &cfg.OpenService
+	os.APIKey = resolveEnvVar(strings.TrimSpace(os.APIKey))
+	os.Header = strings.TrimSpace(os.Header)
+	if os.Header == "" {
+		os.Header = "X-API-Key"
+	}
+	// 默认屏蔽智能体流程控制类工具（详见 OpenServiceConfig 注释）
+	if len(os.BlockedTools) == 0 {
+		os.BlockedTools = []string{"finish_task", "wait", "wait_until"}
+	}
+	// 没配密钥就不能启用——否则等于把内网能力无条件对外开放
+	if !v.IsSet("open_service.enabled") {
+		os.Enabled = os.APIKey != ""
+	}
+	if os.Enabled && os.APIKey == "" {
+		os.Enabled = false
 	}
 
 	GlobalConfig = &cfg

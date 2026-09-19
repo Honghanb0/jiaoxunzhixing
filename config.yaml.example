@@ -147,4 +147,19 @@ henghao:
   # （前端已对这种情况做超时提示，不会只留一个空白框）。
   # 地址取自平台「凭据」页的「小恒插件集成」一行。
   chatbot_base_url: "https://gc.das-ai.com:9094"
+
+# 对外工具服务：把本平台智能体工具以 HTTP 开放给第三方平台调用
+# 用途：对接恒脑的「API 工具」，让恒脑侧编排的智能体能调用我们的扫描/检索能力。
+# 接口：GET  /api/open/tools          → 工具清单（name/description/schema）
+#       POST /api/open/tools/:name    → 执行工具，body 为该工具的入参 JSON
+# 鉴权：请求头 X-API-Key（与用户 JWT 是两套，面向机器调用）
+open_service:
+  enabled: true
+  api_key: "${OPEN_SERVICE_API_KEY}"   # 服务密钥，务必用环境变量注入、不要入库
+  header: "X-API-Key"
+  # 禁止外露的工具：默认屏蔽智能体流程控制类（对方有自己的编排，外露会被误用）
+  blocked_tools:
+    - finish_task
+    - wait
+    - wait_until
   timeout_ms: 60000                   # 单次智能体执行超时（毫秒）

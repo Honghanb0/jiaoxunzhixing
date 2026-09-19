@@ -252,6 +252,20 @@ func NewServerWithEngine(cfg *config.Config, store *storage.Neo4jStore, engine *
 		}
 	}
 
+	// 对外工具服务：把智能体工具开放给第三方平台（恒脑「API 工具」）调用。
+	// 独立于上面的 protected 分组——这里是**机器调用**，用服务密钥而非用户 JWT；
+	// 未配置 open_service.api_key 时不注册路由，避免"忘了配密钥就等于全开放"。
+	// agentMgr 理论上始终非 nil，但仍做保护：没有工具注册表就没有可开放的能力。
+	if cfg.OpenService.Enabled && agentMgr != nil {
+		openTools := NewOpenToolsHandler(agentMgr.Registry(), &cfg.OpenService)
+		open := router.Group("/api/open")
+		open.Use(RequireServiceKey(&cfg.OpenService))
+		{
+			open.GET("/tools", openTools.ListTools)
+			open.POST("/tools/:name", openTools.Execute)
+		}
+	}
+
 	// 前端静态资源（SPA）。web_root 默认 ./web，并兼容“从其他目录启动二进制”的情况。
 	webRoot := resolveWebRoot(cfg.Server.WebRoot)
 	router.Static("/web", webRoot)
