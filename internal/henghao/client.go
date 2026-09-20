@@ -69,7 +69,14 @@ const (
 	PathAssistantTokenCheck = "/open/api/assistants/token/checkWithRefresh"
 
 	// ChatbotPath 是 iframe 里要访问的页面路径（配合 chatbot base 使用）。
-	ChatbotPath = "/chatbot"
+	//
+	// ⚠️ 实测结论（2026-09-20）：正确路径是 **/chatBot/**（大写 B、带结尾斜杠），
+	// 且宿主就是开放服务同一台公网主机 https://www.das-ai.com ——
+	// 平台资料里给的 https://gc.das-ai.com:9094/dasChat 会 301 跳到
+	// https://www.das-ai.com/chatBot/…；而 gc.das-ai.com 的 9094/9092 两个端口
+	// 无论公网还是公司内网都只有 TCP 通、应用层不响应（实测 443 正常但 9094/9092 无服务）。
+	// 平台文档写的 /chatbot 与实测不符，以实测为准。
+	ChatbotPath = "/chatBot/"
 	// ChatbotAppType Chatbot 页面要求的固定参数。
 	ChatbotAppType = "assistants"
 )

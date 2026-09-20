@@ -300,8 +300,9 @@ func TestSearch_RealWorldShape(t *testing.T) {
 
 // TestChatbotURL 校验 iframe 地址拼装（含 token 转义）。
 func TestChatbotURL(t *testing.T) {
-	got := ChatbotURL("https://gc.das-ai.com:9094/", "eyJhbGci+Oi/x=")
-	want := "https://gc.das-ai.com:9094/chatbot?appType=assistants&token=eyJhbGci%2BOi%2Fx%3D"
+	// 路径 /chatBot/ 为实测结果（大写 B、带结尾斜杠），见 ChatbotPath 注释
+	got := ChatbotURL("https://www.das-ai.com/", "eyJhbGci+Oi/x=")
+	want := "https://www.das-ai.com/chatBot/?appType=assistants&token=eyJhbGci%2BOi%2Fx%3D"
 	if got != want {
 		t.Errorf("ChatbotURL 拼装错误:\n got=%q\nwant=%q", got, want)
 	}
